@@ -73,6 +73,14 @@ export interface IntegrationRecord {
   lastSyncedAt: number | null;
   lastSyncError: string | null;
   itemMap: Record<string, ItemMapEntry>;
+  /**
+   * Set while a disconnect purge is paging through the item map; syncs skip the record. Carries
+   * the running totals, plus the cursor this page was computed from (`fromCursor`, undefined for
+   * the first page) and the cursor it handed back (`nextCursor`, undefined once done): a repeated
+   * call whose own cursor matches `fromCursor` is the same page again (its response was lost) and
+   * must return this same state rather than reprocessing and double-counting it.
+   */
+  disconnecting?: { purged: number; skipped: number; fromCursor?: string; nextCursor?: string };
   createdAt: number;
   updatedAt: number;
 }
@@ -113,8 +121,69 @@ export async function loadIntegration(env: IntegrationEnv, provider: string): Pr
   }
 }
 
+// Create-or-replace, for connect only — partial updates go through updateIntegration.
 export async function saveIntegration(env: IntegrationEnv, record: IntegrationRecord): Promise<void> {
   await env.OAUTH_KV.put(`${INTEGRATIONS_KEY_PREFIX}${record.provider}`, JSON.stringify(record));
+}
+
+// The ONLY way to update part of an existing record. Every writer that held a
+// record across awaited work and saved it back clobbered whatever landed in
+// between — a mid-sync layer change most damagingly (#348). Reading fresh at
+// save time shrinks the lost-update window from "the whole sync" to "the gap
+// between this read and this put"; KV has no compare-and-swap, so the gap
+// cannot be closed entirely, only made vanishingly small.
+export async function updateIntegration(
+  env: IntegrationEnv,
+  provider: string,
+  mutate: (record: IntegrationRecord) => void,
+): Promise<IntegrationRecord | null> {
+  const record = await loadIntegration(env, provider);
+  if (!record) return null;
+  mutate(record);
+  await saveIntegration(env, record);
+  return record;
+}
+
+// A sync's itemMap writes as deltas over its read snapshot (#348). The persisted
+// write is the deltas, applied to a freshly read record; `get` is the sync's
+// own working view (snapshot + earlier puts/deletes this run), which later
+// iterations need to see just as the old in-place writes let them — a repeated
+// key must update the mirror it just created, and a deleted one must not be
+// deleted twice. Record only successful operations.
+export class ItemMapDeltas {
+  // Item ids are arbitrary upstream strings, so nothing here may treat a plain
+  // object's inherited members ("constructor", "__proto__", ...) as entries:
+  // pending state is Map/Set, and the snapshot is read by own property only.
+  private puts = new Map<string, ItemMapEntry>();
+  private deletes = new Set<string>();
+
+  constructor(private snapshot: Record<string, ItemMapEntry>) {}
+
+  get(key: string): ItemMapEntry | undefined {
+    if (this.deletes.has(key)) return undefined;
+    const put = this.puts.get(key);
+    if (put) return put;
+    return Object.hasOwn(this.snapshot, key) ? this.snapshot[key] : undefined;
+  }
+
+  put(key: string, entry: ItemMapEntry): void {
+    this.deletes.delete(key);
+    this.puts.set(key, entry);
+  }
+
+  delete(key: string): void {
+    this.puts.delete(key);
+    this.deletes.add(key);
+  }
+
+  applyTo(itemMap: Record<string, ItemMapEntry>): void {
+    // defineProperty, not assignment: `itemMap["__proto__"] = x` would rewire
+    // the prototype instead of creating the key.
+    for (const [key, entry] of this.puts) {
+      Object.defineProperty(itemMap, key, { value: entry, enumerable: true, writable: true, configurable: true });
+    }
+    for (const key of this.deletes) delete itemMap[key];
+  }
 }
 
 export async function deleteIntegration(env: IntegrationEnv, provider: string): Promise<void> {
@@ -163,9 +232,13 @@ export function integrationStatus(
 export interface MirrorStore {
   // Insert a new entry and return its id.
   createEntry(content: string, tags: string[], source: string): Promise<string>;
-  // Replace an entry's content wholesale (re-embed). False if the entry no
-  // longer exists — the caller re-creates the mirror.
-  updateEntry(entryId: string, content: string): Promise<boolean>;
+  // Replace an entry's content wholesale (re-embed): "updated" on success, "not_found" when the
+  // entry is genuinely gone (the caller re-creates the mirror), "busy" when the row is still
+  // there but every compare-and-set attempt lost the race (round 2 adversary, ADV-8 exhaustion:
+  // a caller that read "busy" as "gone" and re-created the mirror duplicated the memory). The
+  // caller must leave its item map untouched on "busy" so the next sync retries the same row
+  // rather than orphaning it under a second, freshly created copy.
+  updateEntry(entryId: string, content: string): Promise<"updated" | "not_found" | "busy">;
   // Permanently delete an entry and its vectors.
   deleteEntry(entryId: string): Promise<void>;
 }

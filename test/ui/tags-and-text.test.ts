@@ -86,6 +86,38 @@ describe("isSystemTag / humanTags", () => {
   });
 });
 
+describe("project tags", () => {
+  const { isSystemTag, humanTags, projectTagsOf } = load();
+
+  it("reserves the project: namespace, so it never renders as a plain chip", () => {
+    expect(isSystemTag("project:my-app")).toBe(true);
+    expect(isSystemTag("Project:My-App")).toBe(true);
+    expect(humanTags(["work", "project:my-app", "idea"])).toEqual(["work", "idea"]);
+  });
+
+  it("does not swallow a plain tag that merely starts with the word project", () => {
+    expect(isSystemTag("project")).toBe(false);
+    expect(isSystemTag("projects-2026")).toBe(false);
+    expect(humanTags(["project", "projects-2026"])).toEqual(["project", "projects-2026"]);
+  });
+
+  it("projectTagsOf returns the slugs, in order and without duplicates", () => {
+    expect(projectTagsOf(["work", "project:website", "idea", "project:app", "project:website"])).toEqual([
+      "website",
+      "app",
+    ]);
+  });
+
+  it("projectTagsOf normalizes case and skips anything that is not a valid slug", () => {
+    expect(projectTagsOf(["Project:Website", "project:", "project:bad slug!", "project:-lead"])).toEqual(["website"]);
+  });
+
+  it("projectTagsOf is safe on malformed input", () => {
+    expect(projectTagsOf(null as any)).toEqual([]);
+    expect(projectTagsOf(["", null, 42, "project:ok"] as any)).toEqual(["ok"]);
+  });
+});
+
 describe("stripToPlainText / titleLine", () => {
   const { stripToPlainText, titleLine, relativeTime, sourceBadge } = load();
 
@@ -204,14 +236,31 @@ describe("stripToPlainText / titleLine", () => {
 
   it("describes the kind of source honestly where no brand mark exists", () => {
     // Anthropic is not in the icon font; a conversation icon says more than a
-    // generic AI sparkle, and claude-code is a terminal rather than a chat.
+    // generic AI sparkle.
     expect(sourceBadge("claude-desktop")).toEqual({ icon: "ti-message-2", label: "claude" });
-    expect(sourceBadge("claude-code").icon).toBe("ti-terminal-2");
     expect(sourceBadge("obsidian").icon).toBe("ti-notes");
   });
 
   it("does not mistake the CLI for GitHub", () => {
     expect(sourceBadge("cli")).toEqual({ icon: "ti-terminal-2", label: "cli" });
+  });
+
+  it("badges a deliberate codex or cursor write as Codex/Cursor, not chatgpt, each keeping its own icon", () => {
+    expect(sourceBadge("codex")).toEqual({ icon: "ti-brand-openai", label: "codex" });
+    expect(sourceBadge("cursor")).toEqual({ icon: "ti-code", label: "cursor" });
+  });
+
+  it("badges every automatic session-capture hook alike, distinct from a deliberate write", () => {
+    // claude-code, codex-session and cursor-session are all "captured for you,
+    // not written by hand" — one shared icon says so at a glance, and none of
+    // them may collide with a deliberate write's own brand icon (codex/cursor).
+    expect(sourceBadge("claude-code")).toEqual({ icon: "ti-history", label: "claude code session" });
+    expect(sourceBadge("codex-session")).toEqual({ icon: "ti-history", label: "codex session" });
+    expect(sourceBadge("cursor-session")).toEqual({ icon: "ti-history", label: "cursor session" });
+    const sessionIcons = new Set(["claude-code", "codex-session", "cursor-session"].map((s) => sourceBadge(s).icon));
+    expect(sessionIcons.size).toBe(1);
+    expect(sourceBadge("codex").icon).not.toBe(sourceBadge("codex-session").icon);
+    expect(sourceBadge("cursor").icon).not.toBe(sourceBadge("cursor-session").icon);
   });
 
   it("truncates a source that is really a sentence", () => {

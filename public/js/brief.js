@@ -22,7 +22,9 @@ async function loadBrief() {
   const el = document.getElementById('brief')
   if (!el) return
   try {
-    const res = await fetch(`${WORKER_URL}/brief`, { headers: { Authorization: `Bearer ${AUTH_TOKEN}` } })
+    // reveal_held=1 (16-t3-t4-trust-spec.md S4): the dashboard is the one caller that opts into a
+    // held row's own preview text (src/routes/brief.ts) - every other caller stays out by default.
+    const res = await fetch(`${WORKER_URL}/brief?reveal_held=1`, { headers: { Authorization: `Bearer ${AUTH_TOKEN}` } })
     if (!res.ok) return // an older Worker has no /brief; the hero stays
     briefData = await res.json()
     if (!briefData.ok) return
@@ -123,6 +125,9 @@ function briefAttention(a) {
     // memories happened to contain those words, which is never reliably the ones
     // the number refers to.
     items.push(`<button class="attn" onclick="openStaleSheet()"><i class="ti ti-clock-exclamation"></i>${escHtml(t('brief.attentionStale', { n: a.stale }))}</button>`)
+  }
+  if (a.due > 0) {
+    items.push(`<button class="attn" onclick="openDueSheet()"><i class="ti ti-bell"></i>${escHtml(t('brief.attentionDue', { n: a.due }))}</button>`)
   }
   if (!items.length) return ''
   return `<div class="brief-attention">${items.join('')}</div>`
@@ -242,6 +247,14 @@ async function briefResolvePattern(id, action, btn) {
     // with the same paint the collapse happens in.
     const panelBody = card.closest('.panel-body')
     if (panelBody && typeof refitThread === 'function') refitThread(panelBody)
+    if (typeof undoToast === 'function') {
+      undoToast(action === 'confirm' ? t('undo.insightConfirmed') : t('undo.insightDismissed'), id, {
+        onUndone: () => {
+          if (typeof loadBrief === 'function') loadBrief()
+          if (typeof refreshAll === 'function') refreshAll()
+        },
+      })
+    }
   } catch {
     card.querySelectorAll('button').forEach((b) => (b.disabled = false))
     btn.classList.remove('digest-btn--loading')

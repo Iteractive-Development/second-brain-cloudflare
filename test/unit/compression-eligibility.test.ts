@@ -4,7 +4,8 @@ import { STATUS_PREFIX } from "../../src/memory/status";
 import { KIND_PREFIX } from "../../src/memory/kind";
 import { VOLATILITY_PREFIX } from "../../src/memory/volatility";
 import { STALE_AS_OF } from "../../src/memory/stale";
-import { CAPSULE_SLOT_TAG_PREFIX, CAPSULE_TAG_PREFIX } from "../../src/tags/system";
+import { CAPSULE_SLOT_TAG_PREFIX, CAPSULE_TAG_PREFIX, PROJECT_TAG_PREFIX } from "../../src/tags/system";
+import { OWED_TO_ME_TAG, STANDING_TAG, T7_TAG_PREFIXES } from "../../src/tags/t7";
 
 describe("compressionEligibilitySql", () => {
   it("includes the importance, recall+age, and contradiction-win clauses", () => {
@@ -35,6 +36,18 @@ describe("compressionEligibilitySql", () => {
     const sql = compressionEligibilitySql();
     expect(sql).not.toContain("entries.");
   });
+
+  // A standing instruction rolled into a digest would stop firing (its own row is gone,
+  // folded into the digest's synthesized text) with nothing to say why — a silent loss the
+  // per-row eligibility check must refuse before importance/recall/age ever gets a say.
+  it("excludes standing:active rows from compression eligibility", () => {
+    expect(compressionEligibilitySql()).toContain(`tags NOT LIKE '%"${STANDING_TAG}"%'`);
+  });
+
+  it("prefixes the standing exclusion's tags column too", () => {
+    const sql = compressionEligibilitySql("entries.");
+    expect(sql).toContain(`entries.tags NOT LIKE '%"${STANDING_TAG}"%'`);
+  });
 });
 
 // The TS predicate and the SQL fragment are two encodings of one rule, and only the TS one
@@ -48,6 +61,7 @@ describe("reserved tags", () => {
     `${VOLATILITY_PREFIX}state`,
     `${CAPSULE_TAG_PREFIX}core`,
     `${CAPSULE_SLOT_TAG_PREFIX}current-state`,
+    `${PROJECT_TAG_PREFIX}website`,
     STALE_AS_OF,
   ];
 
@@ -66,6 +80,7 @@ describe("reserved tags", () => {
       VOLATILITY_PREFIX,
       CAPSULE_TAG_PREFIX,
       CAPSULE_SLOT_TAG_PREFIX,
+      PROJECT_TAG_PREFIX,
     ]) {
       expect(sql).toContain(`value NOT LIKE '${prefix}%'`);
     }
@@ -122,7 +137,7 @@ describe("reserved tags", () => {
   });
 
   it("reserves the namespace, not the bare word", () => {
-    for (const tag of ["volatility", "stale", "status", "kind", "capsule", "capsule-slot", "work"]) {
+    for (const tag of ["volatility", "stale", "status", "kind", "capsule", "capsule-slot", "project", "work"]) {
       expect(isTopicTag(tag)).toBe(true); // a user may legitimately tag something "stale"
     }
   });
@@ -130,5 +145,34 @@ describe("reserved tags", () => {
   it("applies to whatever column it is given", () => {
     expect(isTopicTagSql("entries.tag")).toContain(`entries.tag NOT LIKE '${VOLATILITY_PREFIX}%'`);
     expect(isTopicTagSql()).not.toContain("?"); // no placeholders — safe to inline anywhere
+  });
+});
+
+// Track 7 (standing memory, decision ledger, commitments): none of these
+// namespaces may ever take a digest's tag slot, and the bare words "decision"
+// and "standing" stay ordinary topics (P7.2).
+describe("Track 7 reserved tags are never digest topics", () => {
+  it("rejects every T7 prefix", () => {
+    for (const prefix of T7_TAG_PREFIXES) {
+      const tag = `${prefix}sample`;
+      expect(isReservedTag(tag), tag).toBe(true);
+      expect(isTopicTag(tag), tag).toBe(false);
+    }
+  });
+
+  it("rejects the bare owed-to-me marker without calling it reserved", () => {
+    expect(isTopicTag(OWED_TO_ME_TAG)).toBe(false);
+    expect(isReservedTag(OWED_TO_ME_TAG)).toBe(false);
+    expect(isTopicTagSql()).toContain(`'${OWED_TO_ME_TAG}'`);
+  });
+
+  it("reserves the namespace, not the bare word", () => {
+    expect(isTopicTag("decision")).toBe(true);
+    expect(isTopicTag("standing")).toBe(true);
+  });
+
+  it("excludes every T7 prefix from the SQL too", () => {
+    const sql = isTopicTagSql();
+    for (const prefix of T7_TAG_PREFIXES) expect(sql).toContain(`NOT LIKE '${prefix}%'`);
   });
 });

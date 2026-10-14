@@ -5,11 +5,14 @@ import {
   // applies no minimum-score cutoff, so surfacing this would imply a recall
   // control that does not exist.
   CANDIDATE_SCORE_THRESHOLD,
+  WRITE_PATH_TOPK,
   CONTRADICTION_MAX_TOKENS,
   SMART_MERGE_MAX_TOKENS,
   VECTORIZE_WORKSPACE_FILTER_UNSUPPORTED_KV_KEY,
 } from "../constants";
 import { embed, readStreamText } from "../lib/ai";
+import { excludeHeld } from "../quarantine/tags";
+import { nearestParents } from "../vectorize/parents";
 import { queryVectorizeScoped, singleWorkspaceFilter } from "../vectorize/scope";
 
 type DuplicateResult =
@@ -49,6 +52,14 @@ export async function checkDuplicateAndContradiction(
   // queryVectorizeScoped a fire-and-forget KV write on filter degradation —
   // src/vectorize/scope.ts itself stays env-free.
   ctx?: { waitUntil(promise: Promise<unknown>): void },
+  opts: {
+    /**
+     * A held write (16-t3-t4-trust-spec.md 5.4 W-a, P6): duplicate flagging still runs (the
+     * embed and Vectorize query above are unconditional), but no model call is made, so a
+     * planted note can never talk its way into a merge or a contradiction verdict.
+     */
+    skipModelCall?: boolean;
+  } = {},
 ): Promise<{
   duplicate: DuplicateResult;
   contradiction: ContradictionResult;
@@ -64,6 +75,7 @@ export async function checkDuplicateAndContradiction(
   // on deployments the read path already serves keyword-only (recall/search.ts).
   let matches: VectorizeMatch[] = [];
   try {
+    let hits: VectorizeMatch[];
     if (workspaceId !== undefined) {
       // Dedupe/contradiction compare against the WRITE TARGET's workspace only:
       // a private note must not collide with a colleague's shared one, and
@@ -74,13 +86,14 @@ export async function checkDuplicateAndContradiction(
               .catch((e: unknown) => console.error("Vectorize filter-degradation marker write failed (non-fatal):", e)),
           )
         : undefined;
-      const { matches: filtered } = await queryVectorizeScoped<VectorizeMatch>(
-        env.VECTORIZE, values, { topK: 5, filter: singleWorkspaceFilter(workspaceId).filter, onDegrade },
-      );
-      matches = filtered;
+      ({ matches: hits } = await queryVectorizeScoped<VectorizeMatch>(
+        env.VECTORIZE, values, { topK: WRITE_PATH_TOPK, filter: singleWorkspaceFilter(workspaceId).filter, onDegrade },
+      ));
     } else {
-      ({ matches } = await env.VECTORIZE.query(values, { topK: 5, returnMetadata: "all" }));
+      ({ matches: hits } = await env.VECTORIZE.query(values, { topK: WRITE_PATH_TOPK, returnMetadata: "all" }));
     }
+    // One long note is several vectors; keep the best hit of each of the five nearest distinct notes.
+    matches = nearestParents(hits);
   } catch (e) {
     console.error("Vectorize query failed (capturing without duplicate/contradiction checks):", e);
   }
@@ -91,6 +104,33 @@ export async function checkDuplicateAndContradiction(
     neighborScores.set(pid, Math.max(neighborScores.get(pid) ?? 0, m.score));
   }
   const neighbors = [...neighborScores.entries()].map(([id, score]) => ({ id, score }));
+
+  // Superseded rows are history (T-0089.2.1): never a duplicate to block on, a merge target or a
+  // contradiction candidate, or "I moved back to Denver" would collide with the old Denver row
+  // instead of replacing Austin. One read of the candidate rows, the same statement the candidate
+  // path below always issued; it now runs before the duplicate verdict too.
+  const writerWorkspaceId = workspaceId ?? "";
+  const readThreshold = Math.min(CANDIDATE_SCORE_THRESHOLD, config.DUPLICATE_FLAG_THRESHOLD, config.DUPLICATE_BLOCK_THRESHOLD);
+  const readIds = [...new Set(matches.filter(m => m.score >= readThreshold).map(m => (m.metadata as any)?.parentId ?? m.id))] as string[];
+  let candidateRows: { id: string; content: string }[] = [];
+  const superseded = new Set<string>();
+  if (readIds.length) {
+    const now = Date.now();
+    const placeholders = readIds.map(() => "?").join(", ");
+    // Scoped, not by-id-exempt: see the comment on the candidate prompt below.
+    // validity: current: superseded rows are dropped in JS below, from the candidates and from the duplicate verdict
+    const { results } = await env.DB.prepare(
+      `SELECT id, content, tags, valid_until FROM entries WHERE id IN (${placeholders}) AND +workspace_id = ?`
+    ).bind(...readIds, writerWorkspaceId).all() as { results: { id: string; content: string; tags: string; valid_until: number | null }[] };
+    // Codex review class E (T-0089.4.2): Vectorize's stale vector for a row held AFTER it was
+    // embedded can still surface here as a "match" — this read is what actually keeps a held
+    // neighbor's content out of the merge/contradiction prompt below, not the vector query.
+    for (const r of excludeHeld(results ?? [])) {
+      if (r.valid_until !== null && r.valid_until !== undefined && r.valid_until <= now) superseded.add(r.id);
+      else candidateRows.push({ id: r.id, content: r.content });
+    }
+  }
+  if (superseded.size) matches = matches.filter(m => !superseded.has((m.metadata as any)?.parentId ?? m.id));
 
   let duplicate: DuplicateResult = { status: "unique" };
   if (matches.length) {
@@ -103,12 +143,10 @@ export async function checkDuplicateAndContradiction(
   let contradiction: ContradictionResult = { detected: false };
   let mergeAction: MergeAction | null = null;
 
-  if (duplicate.status !== "blocked") {
+  if (duplicate.status !== "blocked" && !opts.skipModelCall) {
     const candidates = matches.filter(m => m.score >= CANDIDATE_SCORE_THRESHOLD);
     if (candidates.length) {
-      const parentIds = [...new Set(
-        candidates.map(m => (m.metadata as any)?.parentId ?? m.id)
-      )] as string[];
+      const parentIds = new Set(candidates.map(m => (m.metadata as any)?.parentId ?? m.id));
 
       // Scoped, not by-id-exempt. src/lib/scope.ts licenses an unscoped by-id
       // lookup when the ids came from an already-scoped read; these came from a
@@ -125,11 +163,9 @@ export async function checkDuplicateAndContradiction(
       // statement: capture is the hot path and this adds no subrequest. `?? ""`
       // is the pre-tenancy workspace, which is where an entry written without a
       // WriteContext lives, so a solo brain compares exactly the rows it did.
-      const writerWorkspaceId = workspaceId ?? "";
-      const placeholders = parentIds.map(() => "?").join(", ");
-      const { results: rows } = await env.DB.prepare(
-        `SELECT id, content FROM entries WHERE id IN (${placeholders}) AND workspace_id = ?`
-      ).bind(...parentIds, writerWorkspaceId).all() as { results: { id: string; content: string }[] };
+      // The rows were read above, before the duplicate verdict; the candidates are the
+      // current ones among them, in the order the read returned them.
+      const rows = candidateRows.filter(r => parentIds.has(r.id));
 
       if (rows.length) {
         // The ids the model is allowed to name back. `parentIds` is the raw

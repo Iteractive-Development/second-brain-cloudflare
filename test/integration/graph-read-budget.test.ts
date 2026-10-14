@@ -48,7 +48,10 @@ afterEach(() => { sqlite?.close(); sqlite = null; });
  * `n` edges over `n / 4` nodes with weights spread across 0..1, inserted by one recursive
  * CTE — a per-row INSERT from JS is the slow part of a 20,000-edge fixture, not SQLite.
  */
-function seedGraph(db: SqliteD1, n: number): void {
+function seedGraph(db: SqliteD1, n: number, withNodes = true): void {
+  // valid_until is one of the columns src/db/init.ts adds by ALTER at runtime
+  // rather than in schema.sql; buildGraph's node hydration selects it.
+  db.db.prepare(`ALTER TABLE entries ADD COLUMN valid_until INTEGER`).run();
   const nodes = Math.max(2, Math.floor(n / 4));
   db.db.prepare(
     `WITH RECURSIVE seq(i) AS (SELECT 0 UNION ALL SELECT i + 1 FROM seq WHERE i + 1 < ${n})
@@ -57,7 +60,7 @@ function seedGraph(db: SqliteD1, n: number): void {
             'relates_to', (i % 1000) / 1000.0, 'inferred', '{}', 0, 0
      FROM seq`
   ).run();
-  for (let i = 0; i < nodes; i++) db.seed({ id: `n${i}`, content: `Memory ${i}`, createdAt: 1000 + i });
+  if (withNodes) for (let i = 0; i < nodes; i++) db.seed({ id: `n${i}`, content: `Memory ${i}`, createdAt: 1000 + i });
 }
 
 /** env.DB over real SQLite, recording every statement so the plan can be taken later. */
@@ -106,12 +109,13 @@ describe("GET /graph read budget", () => {
 
   it("keeps the same bounded plan as the edge table grows", async () => {
     // The failure mode is a cost that scales with the brain, so the property under test is
-    // that it does not: same plan, same LIMIT, 50x the edges.
+    // that it does not: same plan, same LIMIT, 50x the edges. The plan is a property of the
+    // edges table and its indexes, so the node rows (a slow per-row insert) are left out.
     const plans: string[] = [];
     for (const edges of [500, 25_000]) {
       const db = makeSqliteD1();
       try {
-        seedGraph(db, edges);
+        seedGraph(db, edges, false);
         const { env, statements } = recordingEnv(db);
         await buildGraph({}, env);
         plans.push(await planOf(db, statements.find(s => STRONGEST_EDGES.test(s))!));
@@ -138,6 +142,7 @@ describe("GET /graph read budget", () => {
     // The cheap alternative to the index was dropping ORDER BY entirely. It is not what
     // shipped, so the ordering it would have cost has to stay observable.
     sqlite = makeSqliteD1();
+    await sqlite.db.prepare(`ALTER TABLE entries ADD COLUMN valid_until INTEGER`).run();
     for (let i = 0; i < 6; i++) sqlite.seed({ id: `n${i}`, content: `Memory ${i}`, createdAt: 1000 + i });
     const weights: [string, string, number][] = [["n0", "n1", 0.95], ["n2", "n3", 0.10], ["n4", "n5", 0.60]];
     for (const [source, target, weight] of weights) {
@@ -182,6 +187,9 @@ describe("edges schema drift", () => {
             return { meta: { changes: 0 } };
           },
         }),
+        // v2.2 ownership rule: entries_fts and its triggers are created in
+        // one batch (src/db/init.ts).
+        batch: async (stmts: { run(): Promise<unknown> }[]) => Promise.all(stmts.map(s => s.run())),
       } as unknown as D1Database;
       await initializeDatabase(makeTestEnv(undefined, { DB }));
       const fromInit = (raw.prepare(EDGE_INDEXES).all() as { name: string }[]).map(r => r.name);

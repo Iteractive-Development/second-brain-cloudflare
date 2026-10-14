@@ -36,6 +36,13 @@ export const DEFAULTS = {
   KEYWORD_CANDIDATE_LIMIT: 500,
   SUBSTRING_MATCH_WEIGHT: 0.25,
 
+  // ── Cross-encoder reranker (src/recall/model-reranker.ts) ──
+  // "off" never calls the model; "on" reranks every eligible recall; "auto"
+  // reranks only when the top two heuristic scores are close. Any mode also
+  // needs the readiness latch the model probe writes, so an unverified model
+  // never runs. A model failure always falls back to the un-reranked order.
+  RERANK_MODE: "auto",
+
   // ── Graph expansion (src/graph/traverse.ts) ──
   // Hard cap on traversal depth. Deliberately not surfaced as a user control
   // (#246) — it bounds fanout, it is not a preference.
@@ -57,10 +64,41 @@ export const DEFAULTS = {
   COMPRESSION_MIN_RECALL: 2,
   COMPRESSION_MIN_AGE_MS: 60 * 86400000,
 
+  // ── Source trust in retrieval (src/recall/source-trust.ts, Track 3) ──
+  // All five start at their neutral / off value: source weighting, the
+  // mirror/transcript occupancy cap and the near-duplicate collapse ship
+  // lock-neutral, so every intermediate commit changes no ranking. A later
+  // tuning task flips these once the eval sets their final values (P1).
+  SOURCE_WEIGHT_MIRROR: 1.0,
+  SOURCE_WEIGHT_TRANSCRIPT: 1.0,
+  SOURCE_WEIGHT_SYSTEM: 1.0,
+  MIRROR_MAX_SHARE: 1.0,
+  NOTICE_COLLAPSE: "off",
+
+  // ── Self-protecting quarantine (src/quarantine/score.ts, Track 4) ──
+  // A write scoring at or above the threshold is held out of recall.
+  // Nothing computes a score yet in this commit, so the default is inert;
+  // 100 disables holds outright once scoring lands, but is not the default.
+  QUARANTINE_THRESHOLD: 1.0,
+  // MCP content writes by one actor inside a 10-minute window before a burst hold fires.
+  QUARANTINE_WRITE_BURST: 40,
+  // Status changes by one actor inside a 10-minute window before the brief groups them.
+  QUARANTINE_STATUS_BURST: 10,
+
   // ── Capture tuning (src/constants.ts) ──
   TAG_BOOST_STEP: 0.15,
   TAG_BOOST_MAX: 1.5,
   CONTRADICTION_IMPORTANCE_STEP: 1.0,
+
+  // Re-check age by volatility (spec 14 5.8, T-0089.2.3): a state fact goes untouched for
+  // 90 days before the nightly pass asks again, a volatile one for 14. Durable never re-checks.
+  STALE_AFTER_DAYS_VOLATILE: 14,
+  STALE_AFTER_DAYS_STATE: 90,
+
+  // A mild score demotion for a stale:as-of row under a "current" query intent (spec 14 5.8/B6).
+  // 1.0 (off) until the as-of eval gate passes on knowledge-update:ku-silent with no regression on
+  // ku-silent-true/ku-silent-fresh (director, 2026-09-27); the real value is 0.9.
+  STALE_PENALTY: 1.0,
 
   // ── Models (src/lib/ai.ts) ──
   LLM_MODEL: "@cf/meta/llama-4-scout-17b-16e-instruct",
@@ -69,6 +107,13 @@ export const DEFAULTS = {
   // else above keeps using LLM_MODEL. See the cost comment on
   // constants.INSIGHT_LLM_MODEL for why this is a separate setting.
   INSIGHT_LLM_MODEL: "@cf/openai/gpt-oss-120b",
+  // Used only by src/when/pass.ts's nightly commitment-extraction call.
+  // Defaults to the same model as INSIGHT_LLM_MODEL — a smaller model's
+  // judgment on "is this a commitment, and when is it due" was not measured
+  // to be reliably worse, but nothing here has re-litigated it either, so
+  // this stays a separate, independently overridable setting rather than
+  // aliasing INSIGHT_LLM_MODEL outright.
+  WHEN_LLM_MODEL: "@cf/openai/gpt-oss-120b",
 
   // ── Team edition (src/lib/scope.ts) ──
   // Where a capture lands when neither the request nor the member's own
@@ -104,6 +149,60 @@ export const DEFAULTS = {
   // access to it stayed exactly where they were. "auto" is today's behaviour
   // spelled out, so upgrading changes nothing for anybody.
   TEAM_MODE: "auto",
+
+  // ── Time anchoring (src/when/timezone.ts) ──
+  // IANA zone name a date-only `when` (a bare "2026-06-15", the regex pass's
+  // extracted dates, the model pass's due_at) anchors midnight in — and an
+  // offsetless datetime anchors its wall-clock time in, superseding the
+  // earlier "always UTC" rule. "UTC" by construction: a brain that never sets
+  // this keeps today's behaviour exactly. Validated against Intl.DateTimeFormat
+  // when set (src/config.ts's coerce/validateStrict), not just any non-empty
+  // string — an unrecognized zone name would silently anchor every future due
+  // date at the wrong instant instead of failing the write that set it.
+  TIMEZONE: "UTC",
+
+  // ── Web Push (src/push/vapid.ts) ──
+  // VAPID JWT contact: a mailto:<address> or an https: URL, RFC 8292's own
+  // two accepted shapes. Empty by default — a brain that never sets this
+  // falls back to the origin recorded the first time POST /push/subscribe
+  // saw a real Request, which is enough for every push service tested
+  // (FCM, Apple) to accept the JWT. Set this to give subscribers a real
+  // contact, not to work around a rejection: an EMPTY default, not a fixed
+  // placeholder string, is what this key protects — see the comment on the
+  // .local placeholder this replaced in src/push/vapid.ts.
+  PUSH_CONTACT: "",
+
+  // ── Sampled recall log (src/recall/log.ts, T-0089.5.2) ──
+  // Off by default everywhere (D5.2): the log holds the user's own query text, so it is
+  // opt-in rather than opt-out. Consequences of leaving it off: Part B's implicit feedback
+  // never accrues, and T-0043's golden set can only harvest from a brain that turned it on.
+  RECALL_LOG: "off",
+
+  // ── Content versions and trash (src/memory/versions.ts, src/memory/trash.ts) ──
+  // Prior states kept per memory, newest first. The oldest fall off as new ones arrive.
+  VERSION_KEEP: 20,
+  // Days a forgotten memory waits in the trash before it is purged for good.
+  TRASH_RETENTION_DAYS: 14,
+
+  // ── Standing memory (src/standing/*, Track 7, T-0089.7.1) ──
+  // Eval-tuned firing threshold (the committed standing eval report, Task 2's chosen value
+  // for the raw-input curve — see SYNTHETIC-CORPORA.md). Not a fixed constant: a future
+  // re-run of the eval retunes this without a code change.
+  STANDING_THRESHOLD: 0.67,
+  // Capacity, not a fixed cap: how many standing memories one workspace may hold at once
+  // (Design 2.1 "the cap", 2.4's oldest-first cache build).
+  STANDING_MAX: 50,
+  // Dimension of DEFAULTS.EMBEDDING_MODEL's vectors (bge-small-en-v1.5). Threaded explicitly
+  // into the standing cache codec/build rather than hard-coded there, so a future embedding
+  // model change updates both together.
+  EMBEDDING_DIM: 384,
+
+  // ── Decision ledger (src/decisions/*, Track 7, T-0089.7.2) ──
+  // D7.3: a decision's review date when neither review_by nor when is given.
+  DECISION_REVIEW_DEFAULT_DAYS: 90,
+  CALIBRATION_MIN_N: 10,
+  CALIBRATION_MIN_BUCKET_N: 5,
+  CALIBRATION_MIN_TOPIC_N: 5,
 } as const;
 
 // DEFAULTS is `as const` so the shipped values are pinned and a typo shows up
@@ -157,17 +256,82 @@ export const RULES: Record<ConfigKey, Rule> = {
   COMPRESSION_MIN_RECALL: { kind: "number", min: 0, max: 100, integer: true },
   COMPRESSION_MIN_AGE_MS: { kind: "number", min: 0, max: 10 * 365 * 86400000, integer: true },
 
+  SOURCE_WEIGHT_MIRROR: { kind: "number", min: 0.5, max: 1.0 },
+  SOURCE_WEIGHT_TRANSCRIPT: { kind: "number", min: 0.5, max: 1.0 },
+  SOURCE_WEIGHT_SYSTEM: { kind: "number", min: 0.5, max: 1.0 },
+  MIRROR_MAX_SHARE: { kind: "number", min: 0.1, max: 1.0 },
+  NOTICE_COLLAPSE: { kind: "string" },
+
+  QUARANTINE_THRESHOLD: { kind: "number", min: 0.5, max: 100 },
+  QUARANTINE_WRITE_BURST: { kind: "number", min: 5, max: 1000, integer: true },
+  QUARANTINE_STATUS_BURST: { kind: "number", min: 3, max: 1000, integer: true },
+
   TAG_BOOST_STEP: { kind: "number", min: 0, max: 1 },
   TAG_BOOST_MAX: { kind: "number", min: 1, max: 5 },
   CONTRADICTION_IMPORTANCE_STEP: { kind: "number", min: 0, max: 5 },
+  STALE_AFTER_DAYS_VOLATILE: { kind: "number", min: 1, max: 365, integer: true },
+  STALE_AFTER_DAYS_STATE: { kind: "number", min: 7, max: 730, integer: true },
+  STALE_PENALTY: { kind: "number", min: 0.5, max: 1.0 },
+
+  RERANK_MODE: { kind: "string" },
 
   LLM_MODEL: { kind: "string" },
   EMBEDDING_MODEL: { kind: "string" },
   INSIGHT_LLM_MODEL: { kind: "string" },
+  WHEN_LLM_MODEL: { kind: "string" },
   TEAM_DEFAULT_WORKSPACE: { kind: "string" },
   TEAM_INSIGHTS: { kind: "string" },
   TEAM_MODE: { kind: "string" },
+  TIMEZONE: { kind: "string" },
+  PUSH_CONTACT: { kind: "string" },
+  RECALL_LOG: { kind: "string" },
+  VERSION_KEEP: { kind: "number", min: 5, max: 500, integer: true },
+  TRASH_RETENTION_DAYS: { kind: "number", min: 1, max: 365, integer: true },
+
+  STANDING_THRESHOLD: { kind: "number", min: 0.5, max: 0.95 },
+  STANDING_MAX: { kind: "number", min: 1, max: 100, integer: true },
+  EMBEDDING_DIM: { kind: "number", min: 1, max: 4096, integer: true },
+
+  DECISION_REVIEW_DEFAULT_DAYS: { kind: "number", min: 7, max: 730, integer: true },
+  CALIBRATION_MIN_N: { kind: "number", min: 5, max: 100, integer: true },
+  CALIBRATION_MIN_BUCKET_N: { kind: "number", min: 3, max: 50, integer: true },
+  CALIBRATION_MIN_TOPIC_N: { kind: "number", min: 3, max: 50, integer: true },
 };
+
+/**
+ * The only cheap probe available — there is no static IANA zone list to check
+ * against, and Intl.DateTimeFormat throws RangeError for a name it does not
+ * recognize. Special-cased on the key rather than a new Rule kind: every
+ * other consumer of RULES/coerce/validateStrict treats "string" generically,
+ * and TIMEZONE is the one string setting where "non-empty" is not "valid".
+ */
+function isValidTimeZone(value: string): boolean {
+  try {
+    new Intl.DateTimeFormat("en-US", { timeZone: value });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+export const RERANK_MODES = ["off", "on", "auto"] as const;
+export type RerankMode = (typeof RERANK_MODES)[number];
+export const isRerankMode = (value: unknown): value is RerankMode => (RERANK_MODES as readonly unknown[]).includes(value);
+
+export const NOTICE_COLLAPSE_MODES = ["off", "on"] as const;
+export type NoticeCollapseMode = (typeof NOTICE_COLLAPSE_MODES)[number];
+export const isNoticeCollapseMode = (value: unknown): value is NoticeCollapseMode =>
+  (NOTICE_COLLAPSE_MODES as readonly unknown[]).includes(value);
+
+export const RECALL_LOG_MODES = ["off", "on"] as const;
+export type RecallLogMode = (typeof RECALL_LOG_MODES)[number];
+export const isRecallLogMode = (value: unknown): value is RecallLogMode =>
+  (RECALL_LOG_MODES as readonly unknown[]).includes(value);
+
+/** RFC 8292 section 2's two accepted VAPID `sub` shapes. */
+function isValidPushContact(value: string): boolean {
+  return /^mailto:[^@\s]+@[^@\s]+$/.test(value) || /^https:\/\/\S+$/.test(value);
+}
 
 /**
  * Groups that must stay internally ordered. A violation is not clamped
@@ -198,8 +362,33 @@ export function coerce(key: ConfigKey, value: unknown): { value: Config[ConfigKe
   const fallback = DEFAULTS[key] as Config[ConfigKey];
 
   if (rule.kind === "string") {
+    // PUSH_CONTACT is the one string setting where EMPTY is the valid,
+    // meaningful default (see src/push/vapid.ts) rather than "unsalvageable" —
+    // every other string key requires non-empty, checked below.
+    if (key === "PUSH_CONTACT") {
+      if (value === "") return { value: "" as Config[ConfigKey] };
+      if (typeof value !== "string" || !isValidPushContact(value)) {
+        return { value: fallback, note: `${key}: expected empty, a mailto:<address>, or an https:// URL, got ${JSON.stringify(value)}` };
+      }
+      return { value: value as Config[ConfigKey] };
+    }
+    // A closed enum: an unknown stored value reads as "off" (never the model), not as the default.
+    if (key === "RERANK_MODE" && !isRerankMode(value)) {
+      return { value: "off" as Config[ConfigKey], note: `${key}: expected off, on or auto, got ${JSON.stringify(value)}; reranking stays off` };
+    }
+    // A closed enum: an unknown stored value reads as "off" (the collapse stays off), not as the default.
+    if (key === "NOTICE_COLLAPSE" && !isNoticeCollapseMode(value)) {
+      return { value: "off" as Config[ConfigKey], note: `${key}: expected off or on, got ${JSON.stringify(value)}; the collapse stays off` };
+    }
+    // A closed enum: an unknown stored value reads as "off" (the log stays off, D5.2's opt-in default), not as the default key's own value — which happens to also be "off" today, but this must not depend on that coincidence.
+    if (key === "RECALL_LOG" && !isRecallLogMode(value)) {
+      return { value: "off" as Config[ConfigKey], note: `${key}: expected off or on, got ${JSON.stringify(value)}; the log stays off` };
+    }
     if (typeof value !== "string" || value.trim() === "") {
       return { value: fallback, note: `${key}: expected a non-empty string, got ${typeof value}` };
+    }
+    if (key === "TIMEZONE" && !isValidTimeZone(value)) {
+      return { value: fallback, note: `${key}: "${value}" is not a recognized IANA timezone` };
     }
     return { value: value as Config[ConfigKey] };
   }
@@ -299,9 +488,19 @@ function validateStrict(key: string, value: unknown): string | null {
   const rule = RULES[key as ConfigKey];
 
   if (rule.kind === "string") {
-    return typeof value === "string" && value.trim() !== ""
-      ? null
-      : `${key} must be a non-empty string`;
+    if (key === "PUSH_CONTACT") {
+      if (value === "") return null;
+      return typeof value === "string" && isValidPushContact(value)
+        ? null
+        : `${key} must be empty, a mailto:<address>, or an https:// URL`;
+    }
+    if (key === "RERANK_MODE") return isRerankMode(value) ? null : `${key} must be one of ${RERANK_MODES.join(", ")}`;
+    if (key === "NOTICE_COLLAPSE") return isNoticeCollapseMode(value) ? null : `${key} must be one of ${NOTICE_COLLAPSE_MODES.join(", ")}`;
+    if (typeof value !== "string" || value.trim() === "") return `${key} must be a non-empty string`;
+    if (key === "TIMEZONE" && !isValidTimeZone(value)) {
+      return `${key} must be a recognized IANA timezone name (e.g. "America/New_York")`;
+    }
+    return null;
   }
   if (typeof value !== "number" || !Number.isFinite(value)) {
     return `${key} must be a finite number`;

@@ -8,6 +8,16 @@ async function loadTags() {
       const sel = document.getElementById(id)
       if (!sel) return
       sel.innerHTML = `<option value="">${escHtml(t('recall.allTags'))}</option>`
+      // T7-E Task 14: "Standing instructions" only on the Memories screen's own
+      // filter — recall's tag dropdown (tag-filter-recall) narrows a set of
+      // scored matches by an ordinary tag, which GET /standing's firing state
+      // is not.
+      if (id === 'tag-filter-recent') {
+        const standingOpt = document.createElement('option')
+        standingOpt.value = STANDING_FILTER_VALUE
+        standingOpt.textContent = t('standing.filterLabel')
+        sel.appendChild(standingOpt)
+      }
       tags.forEach((tagName) => {
         const opt = document.createElement('option')
         opt.value = tagName
@@ -34,6 +44,13 @@ function onTimeRangeChange(val) {
 }
 
 function applyRecentFilters() {
+  // T7-E Task 14: "Standing instructions" is GET /standing's firing state,
+  // not a tag to match against the already-loaded list, so it bypasses the
+  // client-side narrowing below entirely (recent.js's loadStandingFilter).
+  if (selectedTag === STANDING_FILTER_VALUE) {
+    if (typeof loadStandingFilter === 'function') loadStandingFilter()
+    return
+  }
   let entries = allEntries
   if (selectedTag) {
     const tag = selectedTag.replace(/^#/, '').toLowerCase().trim()
@@ -64,6 +81,7 @@ function applyRecentFilters() {
 }
 
 function switchTab(tab) {
+  const previousTab = currentTab
   currentTab = tab
   document.querySelectorAll('.screen').forEach((s) => s.classList.remove('active'))
   document.querySelectorAll('.nav-tab, .sb-tab').forEach((t) => t.classList.remove('active'))
@@ -74,6 +92,13 @@ function switchTab(tab) {
   // Only the projection on screen pays for itself; the graph is the expensive
   // one and stays unfetched until someone asks to see it.
   if (tab === 'memories') memoryView === 'graph' ? loadGraph() : loadRecent()
+  // The registry is small and changes rarely, but a project created from an AI
+  // tool while this window sat open is exactly what someone arriving here wants.
+  // Pressing the tab you are already on is the way back out of a project.
+  if (tab === 'projects' && typeof loadProjects === 'function') {
+    if (previousTab === 'projects' && typeof backToProjects === 'function') backToProjects()
+    else loadProjects()
+  }
   // Home shows counts and a brief that were fetched at startup, so arriving
   // back at it is exactly when they are most likely to be out of date. Rate
   // limited, so tab-flicking does not re-run the brief's queries each time.

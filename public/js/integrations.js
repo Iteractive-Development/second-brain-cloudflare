@@ -540,7 +540,9 @@ async function runMoveLoop(provider, post, onProgress) {
     }
     if (onProgress) onProgress({ done, total })
     if (remaining > 0 && res.cursor === sentCursor) {
-      throw new Error('Move did not advance — the cursor is stalled')
+      const err = new Error('Move did not advance — the cursor is stalled')
+      err.partial = { ...totals }
+      throw err
     }
     cursor = res.cursor
     if (!cursor) {
@@ -690,7 +692,11 @@ async function moveIntegrationMemories(provider, btn, expectedTarget) {
         // The confirmed layer no longer matches the connection's current
         // one — a fresh confirmation is required, not a resume: blindly
         // continuing would move memories into a layer the user never agreed to.
-        note.textContent = t('integrations.moveLayerChanged')
+        // The operator can only decide WHAT to reconfirm if told how much
+        // already landed in the layer they originally confirmed (#355).
+        note.textContent = movedSoFar > 0
+          ? tPlural('integrations.moveLayerChangedPartial', movedSoFar, { n: movedSoFar })
+          : t('integrations.moveLayerChanged')
       } else if (movedSoFar > 0) {
         note.textContent = t('integrations.moveStoppedPartway', { n: movedSoFar })
       } else {
@@ -726,13 +732,19 @@ async function disconnectIntegration(provider, btn) {
       btn.disabled = true
       btn.textContent = t('integrations.disconnecting')
       try {
-        const res = await fetch(`${WORKER_URL}/integrations/${provider}/disconnect`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${AUTH_TOKEN}` },
-          body: JSON.stringify({ purge }),
-        })
-        const data = await res.json()
-        if (!res.ok || !data.ok) throw new Error(data.error || t('integrations.disconnectFailed'))
+        // A purge runs in pages: 202 with done:false hands back next_cursor to continue from.
+        let cursor
+        for (;;) {
+          const res = await fetch(`${WORKER_URL}/integrations/${provider}/disconnect`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${AUTH_TOKEN}` },
+            body: JSON.stringify(cursor === undefined ? { purge } : { purge, cursor }),
+          })
+          const data = await res.json()
+          if (!res.ok || !data.ok) throw new Error(data.error || t('integrations.disconnectFailed'))
+          if (data.done !== false) break
+          cursor = data.next_cursor
+        }
         await loadIntegrations()
         if (purge) refreshAll()
       } catch (e) {

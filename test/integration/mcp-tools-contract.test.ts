@@ -19,16 +19,22 @@ import { createMember } from "../../src/lib/team-admin";
 const ctx = { waitUntil: (_: Promise<unknown>) => {} } as ExecutionContext;
 
 const EXPECTED_TOOLS = [
+  "brief",
+  "resolve",
+  "digest",
+  "history",
   "remember",
   "recall",
   "list_recent",
   "list_teams",
+  "list_projects",
   "get_prompt_capsule",
   "get",
   "append",
   "update",
   "set_status",
   "forget",
+  "undo",
   "share",
   "link",
   "unlink",
@@ -122,6 +128,84 @@ describe("MCP tools contract (InMemoryTransport)", () => {
       expect(text).toMatch(/project-alpha kickoff note/i);
     });
   });
+
+  it("remember stores an explicit when, defaulting when_kind to wake", async () => {
+    await withMcpClient(env, async (client) => {
+      const result = await client.callTool({
+        name: "remember",
+        arguments: { content: "Renew the passport", when: "2026-06-15" },
+      });
+      expect(result.isError).toBeFalsy();
+    });
+    expect(db.entries).toHaveLength(1);
+    expect(db.entries[0].when_at).toBe(Date.parse("2026-06-15"));
+    expect(db.entries[0].when_kind).toBe("wake");
+    expect(db.entries[0].when_source).toBe("explicit");
+  });
+
+  it("remember rejects an unparseable when", async () => {
+    await withMcpClient(env, async (client) => {
+      const result = await client.callTool({
+        name: "remember",
+        arguments: { content: "Test note", when: "not a date" },
+      });
+      expect(result.isError).toBeFalsy(); // tool errors are reported in text, not as a transport error
+      const text = (result.content as { type: string; text: string }[])[0]?.text ?? "";
+      expect(text).toMatch(/parseable/);
+    });
+    expect(db.entries).toHaveLength(0);
+  });
+
+  // Nit (a): silently dropping when_kind without when hides a caller's
+  // mistake; POST /capture already hard-errors on this, MCP should match.
+  it("remember hard-errors on when_kind without when", async () => {
+    await withMcpClient(env, async (client) => {
+      const result = await client.callTool({
+        name: "remember",
+        arguments: { content: "Test note", when_kind: "due" },
+      });
+      const text = (result.content as { type: string; text: string }[])[0]?.text ?? "";
+      expect(text).toMatch(/when_kind requires when/);
+    });
+    expect(db.entries).toHaveLength(0);
+  });
+
+  it("append hard-errors on when_kind without when", async () => {
+    db.entries.push({
+      id: "e1", content: "Original note", tags: "[]", source: "api",
+      created_at: 1, updated_at: 1, vector_ids: "[]",
+    });
+    await withMcpClient(env, async (client) => {
+      const result = await client.callTool({
+        name: "append",
+        arguments: { id: "e1", addition: "More detail", when_kind: "due" },
+      });
+      const text = (result.content as { type: string; text: string }[])[0]?.text ?? "";
+      expect(text).toMatch(/when_kind requires when/);
+    });
+    const row = db.entries.find((e: any) => e.id === "e1")!;
+    expect(row.content).toBe("Original note"); // unappended — the error fires before any write
+  });
+
+  it("append sets the time anchor on the existing row without touching content", async () => {
+    db.entries.push({
+      id: "e1", content: "Original note", tags: "[]", source: "api",
+      created_at: 1, updated_at: 1, vector_ids: "[]",
+    });
+    await withMcpClient(env, async (client) => {
+      const result = await client.callTool({
+        name: "append",
+        arguments: { id: "e1", addition: "Follow-up detail", when: "2026-06-15", when_kind: "due" },
+      });
+      expect(result.isError).toBeFalsy();
+    });
+    const row = db.entries.find((e: any) => e.id === "e1")!;
+    expect(row.content).toContain("Original note");
+    expect(row.content).toContain("Follow-up detail");
+    expect(row.when_at).toBe(Date.parse("2026-06-15"));
+    expect(row.when_kind).toBe("due");
+    expect(row.when_source).toBe("explicit");
+  });
 });
 
 // The tool descriptions are the whole recall-quality mechanism on the client
@@ -196,6 +280,16 @@ describe("MCP tool descriptions teach generic recall behaviour", () => {
       expect((await schemaFor("recall")).query?.description).toMatch(/resolve references/i);
     });
 
+    it("teaches as_of: what was true at a past date, corrections applied, a belief never the answer (T-0089.2.2)", async () => {
+      const recall = (await descriptions()).recall;
+      expect(recall).toMatch(/AS OF\./);
+      expect(recall).toMatch(/as_of/);
+      expect(recall).toMatch(/what was actually true then/i);
+      expect(recall).toMatch(/later corrections applied/i);
+      expect(recall).toMatch(/never the answer/i);
+      expect((await schemaFor("recall")).as_of?.description).toMatch(/past date/i);
+    });
+
     it("chooses on fit rather than on recency, score, or length", async () => {
       const recall = (await descriptions()).recall;
       expect(recall).toMatch(/most directly answers the question/i);
@@ -229,7 +323,12 @@ describe("MCP tool descriptions teach generic recall behaviour", () => {
     });
 
     it("stays short enough to work as a tool contract", async () => {
-      expect((await descriptions()).recall.length).toBeLessThan(2200);
+      // 2200 before the Projects paragraph; that paragraph is the four-axis contract. 2500 before the one-sentence EXPLAIN paragraph (T-0089.5.1). 3000 before the AS OF paragraph (T-0089.2.2).
+      expect((await descriptions()).recall.length).toBeLessThan(3000);
+    });
+
+    it("says when to ask for an explanation", async () => {
+      expect((await descriptions()).recall).toMatch(/explain: true when the user asks why a memory came back, or when results look wrong/);
     });
   });
 
@@ -333,11 +432,50 @@ describe("MCP tool descriptions teach generic recall behaviour", () => {
       }
     });
 
-    it("forget is still explicit about permanent deletion", async () => {
+    it("forget stays explicit about deleting, and says where a deleted entry goes", async () => {
       const forget = (await descriptions()).forget;
-      expect(forget).toMatch(/permanently delete/i);
       expect(forget).toMatch(/only call when the user explicitly asks/i);
-      expect(forget).toMatch(/cannot be undone/i);
+      // T-0089.1.2: forget moves to the trash, so it no longer claims to be permanent or unrecoverable.
+      expect(forget).not.toMatch(/cannot be undone|permanently/i);
+      expect(forget).toMatch(/trash/i);
+      expect(forget).toMatch(/retention period \(14 days/i);
+      expect(forget).toMatch(/undo brings it back/i);
+    });
+  });
+
+  describe("undo", () => {
+    it("matches the approved description word for word (T-0089.6.6, S3 adds the group sentence)", async () => {
+      const undo = (await descriptions()).undo;
+      expect(undo).toBe(
+        "Reverse the most recent change to a memory, or restore a memory from the trash. Call when the user says a change was wrong or asks to put something back. Every undo can itself be undone. Pass group (from brief) only when the user asks to undo that whole group.",
+      );
+    });
+
+    it("has no parameter that can delete permanently", async () => {
+      const schema = await schemaFor("undo");
+      expect(schema).not.toHaveProperty("permanent");
+      expect(schema).not.toHaveProperty("confirm");
+      expect(Object.keys(schema).sort()).toEqual(["group", "id", "to_version"]);
+    });
+
+    // S3 (T-0089.4.3, 5.9): group is a single string, never an array -- the schema itself is the
+    // guard against an agent trying to build an id list rather than copy a group key verbatim.
+    it("group is a single string, never an id list", async () => {
+      const schema = await schemaFor("undo");
+      expect(schema.group.type).toBe("string");
+    });
+
+    it("is honest that a hard delete is irreversible and history beyond the cap is gone", async () => {
+      const undo = (await descriptions()).undo;
+      // The top-level description only promises "the most recent change" or "from the trash" — it
+      // never claims universal reversibility, so a tier-3 hard delete (no trash row at all) and a
+      // pruned older version are already outside what it offers.
+      expect(undo).not.toMatch(/undo (any|every) (change|deletion)/i);
+      expect(undo).not.toMatch(/always (restore|recover)/i);
+      // to_version is the one parameter that could be read as reaching arbitrarily far back; its
+      // own description says plainly that pruned history is out of reach.
+      const schema = await schemaFor("undo");
+      expect(schema.to_version.description).toMatch(/age out|no longer (kept|available|reachable)/i);
     });
   });
 
@@ -397,6 +535,19 @@ describe("README's memory-tools table matches the server", () => {
 
     expect(documented.length).toBeGreaterThan(0);
     expect([...documented].sort()).toEqual([...EXPECTED_TOOLS].sort());
+  });
+
+  // Track 2 D4 (T-0089.6.10, spec 14 7.5): the recall, remember and update rows name
+  // as_of/validity, and a line under the table explains what that buys the reader.
+  it("names as_of on recall and validity on remember and update, with a line on time under the table", () => {
+    const readme = readFileSync(README, "utf8");
+    const table = readme.slice(readme.indexOf("### Memory tools"), readme.indexOf("### Projects"));
+    const rowFor = (tool: string) => table.match(new RegExp(`^\\| \`${tool}\`.*$`, "m"))?.[0] ?? "";
+
+    expect(rowFor("recall")).toMatch(/as_of|past date/i);
+    expect(rowFor("remember")).toMatch(/became.*true|valid_from/i);
+    expect(rowFor("update")).toMatch(/stopped being true|valid_until/i);
+    expect(table).toMatch(/as_of/);
   });
 });
 
