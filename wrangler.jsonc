@@ -2,6 +2,7 @@
 	"$schema": "node_modules/wrangler/config-schema.json",
 	"name": "second-brain",
 	"main": "src/index.ts",
+\t"account_id": "5ca777199efbdf72ade5d2d504e6291c",
 	"compatibility_date": "2026-06-17",
 	"compatibility_flags": [
 		"nodejs_compat"
@@ -9,7 +10,8 @@
 	"d1_databases": [
 		{
 			"binding": "DB",
-			"database_name": "second-brain-db"
+\t\t\t"database_name": "second-brain-db",
+\t\t\t"database_id": "4408bf77-6aa6-4036-8927-ad30b02dfe2f"
 		}
 	],
 	"vectorize": [
@@ -23,7 +25,8 @@
 	},
 	"kv_namespaces": [
 		{
-			"binding": "OAUTH_KV"
+\t\t\t"binding": "OAUTH_KV",
+\t\t\t"id": "8abe6364afaa456d9ab01fb4509e1a9c"
 		}
 	],
 	"vars": {
