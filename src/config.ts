@@ -309,17 +309,19 @@ const CHAT_MODEL_CHOICES = [
   "@cf/mistralai/mistral-small-3.1-24b-instruct",
   "@cf/qwen/qwen2.5-coder-32b-instruct",
   "@cf/openai/gpt-oss-120b",
-  // AI Gateway models (src/lib/ai.ts runLLM) — Unified Billing credits or a
-  // BYOK key under the `default` alias. Slugs verified against the model
-  // catalog (developers.cloudflare.com/ai/models, 2026-10-16).
+  // AI Gateway models (src/lib/ai.ts runLLM) — native third-party slugs go
+  // through the Workers AI binding with the gateway option: Unified Billing
+  // credits or a BYOK key under the `default` alias. Slugs verified against
+  // the model catalog (developers.cloudflare.com/ai/models, 2026-10-16).
   "openai/gpt-5.5",
   "openai/gpt-4.1-mini",
   "anthropic/claude-sonnet-5.5",
   "anthropic/claude-haiku-5.5",
   "xai/grok-4.7",
   // z.ai via the account's custom provider (AI Gateway > Custom Providers,
-  // slug "zai", base_url https://api.z.ai) — requests path to
-  // /api/paas/v4/chat/completions, authenticated by the stored z.ai key.
+  // slug "zai", base_url https://api.z.ai/api/paas/v4). The binding cannot
+  // route custom providers, so runLLM calls the gateway compat endpoint with
+  // the CUSTOM_LLM_KEY_ZAI secret on the request (Codra-style BYOK).
   "custom-zai/glm-5.3-flash",
   "custom-zai/glm-5.2",
 ] as const;

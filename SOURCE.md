@@ -17,15 +17,20 @@ Local changes to upstream:
 - `wrangler.jsonc` adds the custom domain route `brain.iteractive.dev`
   (workers.dev stays enabled) and the `AI_GATEWAY` var ("default").
 - External LLM support (4.1.0): `src/lib/ai.ts` `runLLM` routes every
-  chat-style call — `@cf/` models straight to Workers AI, any
-  `provider/model` string (e.g. `openai/gpt-5.5`, `custom-zai/glm-5.3-flash`)
-  through AI Gateway (Unified Billing or a BYOK key under the `default`
-  alias). All eight call sites use it. `src/config.ts` `MODEL_CHOICES` +
-  `modelChoices` on GET `/config` feed three model pickers in the dashboard
-  settings sheet (`public/index.html`, `public/js/settings-panel.js`,
-  `public/js/i18n.js`). `custom-zai/*` names the account's AI Gateway custom
-  provider "zai" (base_url `https://api.z.ai`, path `/api/paas/v4/...`),
-  carrying the GLM Coding Plan key. Embeddings and the reranker stay on
+  chat-style call — `@cf/` models straight to Workers AI, native
+  `provider/model` strings (e.g. `openai/gpt-5.5`) through AI Gateway via the
+  Workers AI binding (Unified Billing or a BYOK key under the `default`
+  alias), and `custom-*` models through the gateway's compat endpoint with the
+  provider key held as a Worker secret (Codra-style BYOK — the binding cannot
+  route custom providers and gateway-side BYOK never substitutes for them,
+  verified 2026-10-16). All eight call sites use it. `src/config.ts`
+  `MODEL_CHOICES` + `modelChoices` on GET `/config` feed three model pickers
+  in the dashboard settings sheet (`public/index.html`,
+  `public/js/settings-panel.js`, `public/js/i18n.js`). `custom-zai/*` names
+  the account's AI Gateway custom provider "zai" (base_url
+  `https://api.z.ai/api/paas/v4`), authenticated by the
+  `CUSTOM_LLM_KEY_ZAI` Worker secret carrying the GLM Coding Plan key; the
+  URL also needs the `CF_ACCOUNT_ID` var. Embeddings and the reranker stay on
   `@cf/` models by design.
 
 No other files differ from upstream `main`. Take upstream updates by merging

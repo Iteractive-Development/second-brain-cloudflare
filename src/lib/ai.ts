@@ -8,12 +8,19 @@ export function graceMs(env: Env): number {
 
 /**
  * One entry point for every chat-style LLM call. `@cf/` models run on
- * Workers AI directly; anything else (`openai/gpt-5.5`, `custom-zai/glm-5.3-flash`,
- * …) is a third-party or custom-provider model addressed through AI Gateway —
- * paid by Unified Billing credits or a BYOK key stored under the `default`
- * alias (AI Gateway "Workers Bindings" doc, checked 2026-10-16). The gateway
- * named by env.AI_GATEWAY (default "default") auto-creates on the first
- * authenticated request.
+ * Workers AI directly. Native third-party models (`openai/gpt-5.5`, …) go
+ * through the gateway via the Workers AI binding. `custom-*` models (account
+ * custom providers, e.g. `custom-zai/glm-5.3-flash`) cannot use the binding:
+ * it 404s on them, and the gateway's Secrets-Store BYOK never substitutes a
+ * key for a custom provider (both checked live, 2026-10-16). So they use the
+ * Codra technique instead: this Worker holds the provider key itself and puts
+ * it on the request, calling the gateway's OpenAI-compat endpoint — the
+ * gateway still fronts the call for logging and caching, but the credential
+ * travels app-side, exactly like Codra's worker decrypts and attaches its
+ * provider keys.
+ *
+ * The gateway named by env.AI_GATEWAY (default "default") auto-creates on the
+ * first authenticated request.
  *
  * Embeddings and the reranker deliberately do NOT go through here: they stay
  * on Workers AI `@cf/` models — the Vectorize index is 384-dim
@@ -23,7 +30,52 @@ export function runLLM(env: Env, model: string, input: Record<string, unknown>):
   // The binding's run() overloads are any-typed by workers-types; passing
   // string/Record keeps this side of the boundary checked.
   if (model.startsWith("@cf/")) return env.AI.run(model, input);
+  if (model.startsWith("custom-")) return runCustomProviderLLM(env, model, input);
   return env.AI.run(model, input, { gateway: { id: env.AI_GATEWAY ?? "default" } });
+}
+
+/** custom-<slug>/<model>: which Worker secret holds that provider's API key. */
+function customProviderKey(env: Env, slug: string): string | undefined {
+  if (slug === "zai") return env.CUSTOM_LLM_KEY_ZAI;
+  return undefined;
+}
+
+/**
+ * The Codra-style BYOK lane described on runLLM. Requests go to the gateway's
+ * compat endpoint (`/compat/chat/completions`), which routes by the
+ * `custom-<slug>/` model prefix to the provider's base_url. With
+ * `stream: true` the SSE body is returned as a ReadableStream — the same
+ * contract the binding returns, so every existing caller (readStreamText,
+ * POST /chat's raw passthrough) works unchanged; the deltas are
+ * OpenAI-shaped, which extractChunkText and its recall.js twin already parse.
+ */
+async function runCustomProviderLLM(env: Env, model: string, input: Record<string, unknown>): Promise<unknown> {
+  const slug = /^custom-([a-z0-9-]+)\//.exec(model)?.[1];
+  const key = slug ? customProviderKey(env, slug) : undefined;
+  if (!slug || !key) {
+    throw new Error(`No provider key configured for model "${model}" — set the CUSTOM_LLM_KEY_${(slug ?? "??").toUpperCase().replace(/-/g, "_")} secret.`);
+  }
+  if (!env.CF_ACCOUNT_ID) throw new Error("CF_ACCOUNT_ID var is required for custom-provider models.");
+
+  const gateway = env.AI_GATEWAY ?? "default";
+  const url = `https://gateway.ai.cloudflare.com/v1/${env.CF_ACCOUNT_ID}/${gateway}/compat/chat/completions`;
+  // The binding injects the model into the request itself; the compat
+  // endpoint expects it in the body, and its router keys off the
+  // `custom-<slug>/` prefix to pick the provider.
+  const resp = await fetch(url, {
+    method: "POST",
+    headers: { Authorization: `Bearer ${key}`, "Content-Type": "application/json" },
+    body: JSON.stringify({ ...input, model }),
+  });
+  if (!resp.ok) {
+    const detail = (await resp.text()).slice(0, 300);
+    throw new Error(`AI Gateway custom-provider call failed: ${resp.status} ${detail}`);
+  }
+  if (input.stream) {
+    if (!resp.body) throw new Error("AI Gateway custom-provider stream returned no body.");
+    return resp.body;
+  }
+  return resp.json();
 }
 
 /**

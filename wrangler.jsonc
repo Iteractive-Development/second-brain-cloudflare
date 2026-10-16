@@ -42,10 +42,13 @@
 		"VECTORIZE_GRACE_MS": "300000",
 		// Gateway id for non-@cf models (src/lib/ai.ts runLLM). "default"
 		// auto-creates on the first authenticated request.
-		"AI_GATEWAY": "default"
+		"AI_GATEWAY": "default",
+		// Account id for the gateway compat URL that runLLM's custom-provider
+		// (Codra-style BYOK) lane calls (src/lib/ai.ts).
+		"CF_ACCOUNT_ID": "5ca777199efbdf72ade5d2d504e6291c"
 	},
 	"secrets": {
-		"required": ["AUTH_TOKEN"]
+		"required": ["AUTH_TOKEN", "CUSTOM_LLM_KEY_ZAI"]
 	},
 	"assets": {
 		"directory": "./public"

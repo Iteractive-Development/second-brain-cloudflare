@@ -223,7 +223,7 @@ describe("GET /insights/dry-run", () => {
     // (src/insight/reason.ts) reads INSIGHT_LLM_MODEL, not the shared
     // LLM_MODEL every other feature uses — see src/constants.ts.
     const kv = makeMemoryKV();
-    await kv.put(CONFIG_KEY, JSON.stringify({ INSIGHT_LLM_MODEL: "custom-model-for-test" }));
+    await kv.put(CONFIG_KEY, JSON.stringify({ INSIGHT_LLM_MODEL: "openai/gpt-5.5-test" }));
     const ai = makeAI(GOOD);
     const env = makeTestEnv(undefined, {
       DB: sqlite.db as any, AI: ai, OAUTH_KV: kv, VECTORIZE: makeVectorizeMock(),
@@ -231,7 +231,7 @@ describe("GET /insights/dry-run", () => {
 
     await call(env, "/insights/dry-run");
 
-    expect((ai.run as any).mock.calls[0][0]).toBe("custom-model-for-test");
+    expect((ai.run as any).mock.calls[0][0]).toBe("openai/gpt-5.5-test");
   });
 });
 
