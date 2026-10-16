@@ -878,6 +878,29 @@
         </div>
         <p class="digest-note settings-row-error" id="setting-version-keep-error" hidden></p>
         <p class="digest-note settings-row-note" data-i18n="settingsPanel.keepHelp">Each change kept is a point you can go back to. Lowering this removes the oldest the next time a memory changes. Raising it does not bring back changes already removed.</p>
+        <div class="menu-group-label" style="margin-top: 18px" data-i18n="settingsPanel.modelsGroup">AI models</div>
+        <div class="team-open-row">
+          <i class="ti ti-message-chat"></i>
+          <span data-i18n="settingsPanel.llmLabel">Model for capture, chat and digests</span>
+          <span class="team-select-wrap"><select class="team-select" id="setting-llm-model" onchange="onSettingChange('setting-llm-model', 'LLM_MODEL')"></select><i class="ti ti-chevron-down"></i></span>
+          <button type="button" class="digest-btn digest-btn--quiet" id="setting-llm-model-reset" onclick="resetSetting('LLM_MODEL')" title="Use the default value" data-i18n="settingsPanel.resetAria" data-i18n-attr="title" hidden><span data-i18n="settingsPanel.reset">Use default</span></button>
+        </div>
+        <p class="digest-note settings-row-error" id="setting-llm-model-error" hidden></p>
+        <div class="team-open-row">
+          <i class="ti ti-bulb"></i>
+          <span data-i18n="settingsPanel.insightLabel">Model for weekly insight reasoning</span>
+          <span class="team-select-wrap"><select class="team-select" id="setting-insight-llm-model" onchange="onSettingChange('setting-insight-llm-model', 'INSIGHT_LLM_MODEL')"></select><i class="ti ti-chevron-down"></i></span>
+          <button type="button" class="digest-btn digest-btn--quiet" id="setting-insight-llm-model-reset" onclick="resetSetting('INSIGHT_LLM_MODEL')" title="Use the default value" data-i18n="settingsPanel.resetAria" data-i18n-attr="title" hidden><span data-i18n="settingsPanel.reset">Use default</span></button>
+        </div>
+        <p class="digest-note settings-row-error" id="setting-insight-llm-model-error" hidden></p>
+        <div class="team-open-row">
+          <i class="ti ti-calendar-due"></i>
+          <span data-i18n="settingsPanel.whenLabel">Model for commitment extraction</span>
+          <span class="team-select-wrap"><select class="team-select" id="setting-when-llm-model" onchange="onSettingChange('setting-when-llm-model', 'WHEN_LLM_MODEL')"></select><i class="ti ti-chevron-down"></i></span>
+          <button type="button" class="digest-btn digest-btn--quiet" id="setting-when-llm-model-reset" onclick="resetSetting('WHEN_LLM_MODEL')" title="Use the default value" data-i18n="settingsPanel.resetAria" data-i18n-attr="title" hidden><span data-i18n="settingsPanel.reset">Use default</span></button>
+        </div>
+        <p class="digest-note settings-row-error" id="setting-when-llm-model-error" hidden></p>
+        <p class="digest-note settings-row-note" data-i18n="settingsPanel.gatewayNote">Provider/model entries (for example custom-zai/glm-5.3-flash) route through Cloudflare AI Gateway and need Unified Billing credits or a stored provider key. Everything else runs on Workers AI.</p>
         <!-- No visible stub: this shows only once GET /config's `defaults`
              carries RECALL_LOG (T-0089.5.5). Its content is that release's. -->
         <div id="setting-recall-log-row" style="display: none"></div>

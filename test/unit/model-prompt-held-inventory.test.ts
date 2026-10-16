@@ -1,12 +1,14 @@
 /**
  * Codex review class E (T-0089.4.2): "no AI model ever sees held text." A held row's content is
  * unreviewed by definition; it must never be read into ANY model prompt -- contradiction,
- * duplicate/merge, digest, insight, classify, or anything else. This scans src/ for every genuine
- * chat-completion call (`(env.AI as any).run(` / `env.AI.run(` with a `messages:` prompt, never an
- * embedding call) and requires each to be named here with why its row source can never include a
- * currently-held row -- either it runs `excludeHeld` (src/quarantine/tags.ts) on its candidate
- * rows immediately before building the prompt, or it structurally cannot reach held content at
- * all. A call site added without one of these two shapes is the bug class E exists to catch.
+ * duplicate/merge, digest, insight, classify, or anything else. Since 4.1.0 every chat call
+ * goes through runLLM (src/lib/ai.ts) -- `runLLM(env, model, {` with a `messages:` prompt;
+ * the reranker still calls `.run(` with `contexts:` directly. This scans src/ for both shapes
+ * (never an embedding call) and requires each site to be named here with why its row source
+ * can never include a currently-held row -- either it runs `excludeHeld` (src/quarantine/tags.ts)
+ * on its candidate rows immediately before building the prompt, or it structurally cannot reach
+ * held content at all. A call site added without one of these two shapes is the bug class E
+ * exists to catch. runLLM's own body (lib/ai.ts) passes `input` opaquely and is skipped below.
  */
 import { describe, it, expect } from "vitest";
 import { readFileSync, readdirSync, statSync } from "node:fs";
@@ -40,13 +42,14 @@ interface Site { file: string; line: number }
  * philosophy every other structural guard in this codebase already uses (PROJECTS_CONTENT, for one).
  */
 export function isChatCallSite(lines: string[], i: number): boolean {
-  if (!/\.run\(/.test(lines[i])) return false;
+  if (!/\.run\(|\brunLLM\(/.test(lines[i])) return false;
   const window = lines.slice(i, i + 6).join("\n");
   return /messages\s*:|contexts\s*:/.test(window);
 }
 
-/** Every genuine chat-completion call: `.run(` on an AI binding, passed a `messages:` prompt.
- * Excludes embed calls (embedMany/embed in src/lib/ai.ts), which carry no free-text prompt. */
+/** Every genuine chat-completion call: a `runLLM(` wrapper call or `.run(` on an AI binding,
+ * passed a `messages:` prompt. Excludes embed calls (embedMany/embed in src/lib/ai.ts), which
+ * carry no free-text prompt. */
 function scanChatCalls(): Site[] {
   const sites: Site[] = [];
   for (const path of walk(join(ROOT, "src"))) {
@@ -94,7 +97,7 @@ const ACCOUNTED_FOR: { file: string; line: number; why: string }[] = [
     why: "judgeCommitment's prompt is built from candidateSql's own rows, which now adds NOT_HELD_SQL alongside its existing when_at/when_source/openLoopSql predicates (Codex review class E, T-0089.4.2).",
   },
   {
-    file: "src/routes/recall.ts", line: 309,
+    file: "src/routes/recall.ts", line: 311,
     why: "POST /chat's body.memories is opaque client-composed text (see the route's own comment: the shipped client serializes a prior GET /recall response into it), never a server-side row read here -- there is no candidate query at this boundary to filter. The row-read boundary this rule protects is GET /recall and get(), which already exclude/warn on held content before the client ever sees it to compose from.",
   },
 ];

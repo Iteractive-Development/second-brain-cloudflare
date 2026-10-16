@@ -20,6 +20,7 @@ import { requireAdmin, requireIdentity } from "../lib/identity";
 import { countActiveMembers } from "../lib/team-admin";
 import {
   DEFAULTS,
+  MODEL_CHOICES,
   readOverrides,
   resetOverride,
   resolveConfig,
@@ -39,7 +40,7 @@ export async function handleConfigRoutes(
     if (auth instanceof Response) return auth;
 
     const [config, overrides] = await Promise.all([resolveConfig(env), readOverrides(env)]);
-    return json({ ok: true, config, overrides, defaults: DEFAULTS });
+    return json({ ok: true, config, overrides, defaults: DEFAULTS, modelChoices: MODEL_CHOICES });
   }
 
   // PATCH /config — sparse update; the whole patch is rejected if any key fails

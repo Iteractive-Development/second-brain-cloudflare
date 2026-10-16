@@ -7,6 +7,26 @@ export function graceMs(env: Env): number {
 }
 
 /**
+ * One entry point for every chat-style LLM call. `@cf/` models run on
+ * Workers AI directly; anything else (`openai/gpt-5.5`, `custom-zai/glm-5.3-flash`,
+ * …) is a third-party or custom-provider model addressed through AI Gateway —
+ * paid by Unified Billing credits or a BYOK key stored under the `default`
+ * alias (AI Gateway "Workers Bindings" doc, checked 2026-10-16). The gateway
+ * named by env.AI_GATEWAY (default "default") auto-creates on the first
+ * authenticated request.
+ *
+ * Embeddings and the reranker deliberately do NOT go through here: they stay
+ * on Workers AI `@cf/` models — the Vectorize index is 384-dim
+ * bge-small-en-v1.5 and the cross-encoder has no gateway equivalent.
+ */
+export function runLLM(env: Env, model: string, input: Record<string, unknown>): Promise<unknown> {
+  // The binding's run() overloads are any-typed by workers-types; passing
+  // string/Record keeps this side of the boundary checked.
+  if (model.startsWith("@cf/")) return env.AI.run(model, input);
+  return env.AI.run(model, input, { gateway: { id: env.AI_GATEWAY ?? "default" } });
+}
+
+/**
  * Workers AI streams two different answer shapes depending on model lineage.
  * Llama-family models (the shipped default) put the text directly on
  * `response`. OpenAI-lineage models (`@cf/openai/gpt-oss-*`) stream an

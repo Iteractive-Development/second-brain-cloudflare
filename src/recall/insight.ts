@@ -1,7 +1,7 @@
 import type { Env } from "../env";
 import { DEFAULTS, type Config } from "../config";
 import { LLM_MODEL, INSIGHT_MAX_TOKENS } from "../constants";
-import { readStreamText } from "../lib/ai";
+import { readStreamText, runLLM } from "../lib/ai";
 
 export async function synthesizeInsight(
   query: string,
@@ -31,7 +31,7 @@ Write a brief insight (2-4 sentences).`;
 
   let insight = "";
   try {
-    const stream = await (env.AI as any).run(config.LLM_MODEL as any, {
+    const stream = await runLLM(env, config.LLM_MODEL, {
       messages: [{ role: "user", content: prompt }],
       max_tokens: INSIGHT_MAX_TOKENS,
       stream: true,

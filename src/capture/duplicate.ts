@@ -10,7 +10,7 @@ import {
   SMART_MERGE_MAX_TOKENS,
   VECTORIZE_WORKSPACE_FILTER_UNSUPPORTED_KV_KEY,
 } from "../constants";
-import { embed, readStreamText } from "../lib/ai";
+import { embed, readStreamText, runLLM } from "../lib/ai";
 import { excludeHeld } from "../quarantine/tags";
 import { nearestParents } from "../vectorize/parents";
 import { queryVectorizeScoped, singleWorkspaceFilter } from "../vectorize/scope";
@@ -198,7 +198,7 @@ Respond with JSON only. No text outside the JSON.
 {"action":"keep_both"} OR {"action":"contradiction","conflicting_id":"<id>","reason":"<10 words max>"} OR {"action":"replace","target_id":"<id>"} OR {"action":"merge","target_id":"<id>","merged_content":"<text>"}`;
 
           try {
-            const stream = await (env.AI as any).run(config.LLM_MODEL as any, {
+            const stream = await runLLM(env, config.LLM_MODEL, {
               messages: [{ role: "user", content: prompt }],
               max_tokens: SMART_MERGE_MAX_TOKENS,
               stream: true,
@@ -243,7 +243,7 @@ Respond with JSON only. No text outside the JSON object.
 {"contradicts": false} OR {"contradicts": true, "conflicting_id": "<exact_id>", "reason": "<10 words max>"}`;
 
           try {
-            const stream = await (env.AI as any).run(config.LLM_MODEL as any, {
+            const stream = await runLLM(env, config.LLM_MODEL, {
               messages: [{ role: "user", content: prompt }],
               max_tokens: CONTRADICTION_MAX_TOKENS,
               stream: true,

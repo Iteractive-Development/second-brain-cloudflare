@@ -2,7 +2,7 @@ import type { Env } from "../env";
 import { DEFAULTS, resolveConfig, type Config } from "../config";
 import { captureEntry } from "../capture/entry";
 import { DIGEST_MAX_TOKENS, LLM_MODEL, SYSTEM_SOURCE } from "../constants";
-import { readStreamText } from "../lib/ai";
+import { readStreamText, runLLM } from "../lib/ai";
 import { TAG_LIKE_ESCAPE, tagLikePattern } from "../memory/tag-sql";
 import { MAX_PROJECT_PATTERNS, expandProjectFilter, projectFilterSql } from "../projects/filter";
 import type { ProjectRow } from "../projects/registry";
@@ -40,7 +40,7 @@ State of ${stateOf}:`;
 
   let digest = "";
   try {
-    const stream = await (env.AI as any).run(config.LLM_MODEL as any, {
+    const stream = await runLLM(env, config.LLM_MODEL, {
       messages: [{ role: "user", content: prompt }],
       max_tokens: DIGEST_MAX_TOKENS,
       stream: true,

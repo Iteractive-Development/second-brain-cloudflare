@@ -566,6 +566,12 @@ const I18N_EN = {
     keepLabel: 'How many changes are kept per memory',
     keepHelp:
       'Each change kept is a point you can go back to. Lowering this removes the oldest the next time a memory changes. Raising it does not bring back changes already removed.',
+    modelsGroup: 'AI models',
+    llmLabel: 'Model for capture, chat and digests',
+    insightLabel: 'Model for weekly insight reasoning',
+    whenLabel: 'Model for commitment extraction',
+    gatewayNote:
+      'Provider/model entries (for example custom-zai/glm-5.3-flash) route through Cloudflare AI Gateway and need Unified Billing credits or a stored provider key. Everything else runs on Workers AI.',
     custom: 'Custom ({value})',
     adminOnly: 'Only the owner or an admin can change these.',
     saved: 'Saved',
@@ -1953,6 +1959,12 @@ const I18N_IT = {
     keepLabel: 'Quante modifiche vengono conservate per ogni ricordo',
     keepHelp:
       'Ogni modifica conservata è un punto a cui puoi tornare. Se abbassi il numero, le più vecchie vengono rimosse alla prossima modifica di ogni ricordo. Aumentarlo non recupera quelle già rimosse.',
+    modelsGroup: 'Modelli AI',
+    llmLabel: 'Modello per acquisizione, chat e riepiloghi',
+    insightLabel: 'Modello per le insight settimanali',
+    whenLabel: "Modello per l'estrazione degli impegni",
+    gatewayNote:
+      'Le voci provider/modello (per esempio custom-zai/glm-5.3-flash) passano da Cloudflare AI Gateway e richiedono crediti Unified Billing o una chiave provider salvata. Tutto il resto gira su Workers AI.',
     custom: 'Personalizzato ({value})',
     adminOnly: 'Solo il proprietario o un amministratore può modificarle.',
     saved: 'Salvato',

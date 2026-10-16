@@ -298,6 +298,46 @@ export const RULES: Record<ConfigKey, Rule> = {
   CALIBRATION_MIN_TOPIC_N: { kind: "number", min: 3, max: 50, integer: true },
 };
 
+// One shared list: any of the three chat-model settings may take any model.
+// The defaults (a @cf model each) always ride the list so a picker's default
+// renders as a real option, not a "Custom" row.
+const CHAT_MODEL_CHOICES = [
+  // Workers AI — no gateway, no provider key, included in Workers AI usage.
+  "@cf/meta/llama-4-scout-17b-16e-instruct",
+  "@cf/meta/llama-3.3-70b-instruct-fp8-fast",
+  "@cf/meta/llama-3.1-8b-instruct-fast",
+  "@cf/mistralai/mistral-small-3.1-24b-instruct",
+  "@cf/qwen/qwen2.5-coder-32b-instruct",
+  "@cf/openai/gpt-oss-120b",
+  // AI Gateway models (src/lib/ai.ts runLLM) — Unified Billing credits or a
+  // BYOK key under the `default` alias. Slugs verified against the model
+  // catalog (developers.cloudflare.com/ai/models, 2026-10-16).
+  "openai/gpt-5.5",
+  "openai/gpt-4.1-mini",
+  "anthropic/claude-sonnet-5.5",
+  "anthropic/claude-haiku-5.5",
+  "xai/grok-4.7",
+  // z.ai via the account's custom provider (AI Gateway > Custom Providers,
+  // slug "zai", base_url https://api.z.ai) — requests path to
+  // /api/paas/v4/chat/completions, authenticated by the stored z.ai key.
+  "custom-zai/glm-5.3-flash",
+  "custom-zai/glm-5.2",
+] as const;
+
+/**
+ * Picker choices for the three chat-model settings, surfaced by GET /config
+ * (`modelChoices`). A snapshot, not a live catalog: the AI binding exposes no
+ * model-listing API. NOT exhaustive — a value outside its list is still a
+ * valid setting (rules are kind: "string"); pickers render it as "Custom".
+ * EMBEDDING_MODEL is deliberately absent: the Vectorize index pins it to
+ * 384-dim bge-small-en-v1.5.
+ */
+export const MODEL_CHOICES: Record<"LLM_MODEL" | "INSIGHT_LLM_MODEL" | "WHEN_LLM_MODEL", readonly string[]> = {
+  LLM_MODEL: CHAT_MODEL_CHOICES,
+  INSIGHT_LLM_MODEL: CHAT_MODEL_CHOICES,
+  WHEN_LLM_MODEL: CHAT_MODEL_CHOICES,
+};
+
 /**
  * The only cheap probe available — there is no static IANA zone list to check
  * against, and Intl.DateTimeFormat throws RangeError for a name it does not

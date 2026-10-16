@@ -29,8 +29,20 @@
 			"id": "8abe6364afaa456d9ab01fb4509e1a9c"
 		}
 	],
+	// Custom domain for the dashboard. workers.dev stays enabled: the desktop
+	// app (installer) points at the workers.dev origin, and disabling it would
+	// cut existing installs off.
+	"routes": [
+		{
+			"pattern": "brain.iteractive.dev",
+			"custom_domain": true
+		}
+	],
 	"vars": {
-		"VECTORIZE_GRACE_MS": "300000"
+		"VECTORIZE_GRACE_MS": "300000",
+		// Gateway id for non-@cf models (src/lib/ai.ts runLLM). "default"
+		// auto-creates on the first authenticated request.
+		"AI_GATEWAY": "default"
 	},
 	"secrets": {
 		"required": ["AUTH_TOKEN"]

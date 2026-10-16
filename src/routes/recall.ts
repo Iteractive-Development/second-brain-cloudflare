@@ -4,6 +4,7 @@ import { RECALL_MAX_TOP_K, LLM_MODEL, SEMANTIC_UNAVAILABLE_DETAIL } from "../con
 import { buildEntryFilterQuery } from "../capture/entry";
 import { compressTag } from "../compression/digest";
 import { CORS_HEADERS, intParam, json, readWorkspaceParam, readTeamQueryParam } from "../lib/http";
+import { runLLM } from "../lib/ai";
 import { requireIdentity, type Identity } from "../lib/identity";
 import { assertCanMutateEntry } from "../lib/entry-access";
 import { layerOf, scopeWhereForRead, readScopeWorkspaces } from "../lib/scope";
@@ -305,8 +306,9 @@ Be specific and complete. Concision means leaving out filler, never leaving out 
     const userMessage = `Question: ${body.query}\n\nRelevant memories:\n${body.memories}`;
     const cfg = await resolveConfig(env);
 
-    // Workers AI requires `as any` here — the SDK types don't cover all models
-    const stream = await env.AI.run(cfg.LLM_MODEL as any, {
+    // runLLM routes @cf models straight to Workers AI and everything else
+    // (provider/model, e.g. custom-zai/glm-5.3-flash) through AI Gateway.
+    const stream = await runLLM(env, cfg.LLM_MODEL, {
       messages: [
         { role: "system", content: systemPrompt },
         { role: "user", content: userMessage }

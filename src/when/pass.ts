@@ -51,7 +51,7 @@
 import type { Env } from "../env";
 import { DEFAULTS, resolveConfig, type Config } from "../config";
 import { WHEN_PASS_MAX_TOKENS } from "../constants";
-import { readStreamText } from "../lib/ai";
+import { readStreamText, runLLM } from "../lib/ai";
 import { initializeDatabase } from "../db/init";
 import { zonedMidnightMs } from "./timezone";
 import { openLoopSql } from "../memory/loops";
@@ -266,7 +266,7 @@ Respond with JSON only. No text outside the JSON object.
     // config.WHEN_LLM_MODEL, deliberately not config.LLM_MODEL — see the cost
     // comment on constants.WHEN_PASS_MAX_TOKENS for why this defaults to the
     // same model INSIGHT_LLM_MODEL uses.
-    const stream = await (env.AI as any).run(config.WHEN_LLM_MODEL as any, {
+    const stream = await runLLM(env, config.WHEN_LLM_MODEL, {
       messages: [{ role: "user", content: prompt }],
       max_tokens: WHEN_PASS_MAX_TOKENS,
       stream: true,
