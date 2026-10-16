@@ -900,7 +900,7 @@
           <button type="button" class="digest-btn digest-btn--quiet" id="setting-when-llm-model-reset" onclick="resetSetting('WHEN_LLM_MODEL')" title="Use the default value" data-i18n="settingsPanel.resetAria" data-i18n-attr="title" hidden><span data-i18n="settingsPanel.reset">Use default</span></button>
         </div>
         <p class="digest-note settings-row-error" id="setting-when-llm-model-error" hidden></p>
-        <p class="digest-note settings-row-note" data-i18n="settingsPanel.gatewayNote">Provider/model entries (for example custom-zai/glm-5.3-flash) route through Cloudflare AI Gateway and need Unified Billing credits or a stored provider key. Everything else runs on Workers AI.</p>
+        <p class="digest-note settings-row-note" data-i18n="settingsPanel.gatewayNote">Provider/model entries (for example custom-zai/glm-5.3-flash) route through Cloudflare AI Gateway. z.ai entries use the z.ai key carried by this deployment's Worker; other providers need Unified Billing credits or a stored provider key. Everything else runs on Workers AI.</p>
         <!-- No visible stub: this shows only once GET /config's `defaults`
              carries RECALL_LOG (T-0089.5.5). Its content is that release's. -->
         <div id="setting-recall-log-row" style="display: none"></div>

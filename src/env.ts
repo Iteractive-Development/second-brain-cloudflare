@@ -15,4 +15,4 @@ export interface Env extends Omit<Cloudflare.Env, "VECTORIZE_GRACE_MS" | "AI_GAT
 // Worker version, echoed by GET /health. The desktop app compares this against
 // the version it bundles to offer a one-click "update your Second Brain".
 // Bump (semver) when the Worker changes; see installer/README "Worker versioning".
-export const SB_VERSION = "4.1.1";
+export const SB_VERSION = "4.1.2";

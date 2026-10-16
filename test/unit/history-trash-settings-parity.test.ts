@@ -29,8 +29,10 @@ const CONTRACT = {
  */
 function dashboardChoices(key: string): number[] {
   const src = read("public/js/settings-panel.js");
-  const m = src.match(new RegExp(`${key}:\\s*\\[([^\\]]+)\\]`));
-  if (!m) throw new Error(`SETTINGS_CHOICES.${key} not found in public/js/settings-panel.js`);
+  // Settings live in one table (SETTINGS[key] = { selectId, …, choices: […] }),
+  // so the choice list is the first `choices:` array inside the key's entry.
+  const m = src.match(new RegExp(`${key}:\\s*\\{[^{}]*choices:\\s*\\[([^\\]]+)\\]`));
+  if (!m) throw new Error(`SETTINGS.${key} entry with a choices array not found in public/js/settings-panel.js`);
   return m[1].split(",").map((s) => Number(s.trim()));
 }
 

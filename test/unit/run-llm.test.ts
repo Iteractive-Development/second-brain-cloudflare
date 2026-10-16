@@ -144,7 +144,7 @@ describe("runLLM() custom-provider lane (Codra-style BYOK)", () => {
     ).rejects.toThrow(/404 .*Model not found/);
   });
 
-  it("rejects naming the missing secret when the provider key is not configured", async () => {
+  it("rejects naming the unset secret when the provider is wired but its secret is missing", async () => {
     const fetchMock = vi.fn();
     vi.stubGlobal("fetch", fetchMock);
 
@@ -152,7 +152,17 @@ describe("runLLM() custom-provider lane (Codra-style BYOK)", () => {
       runLLM(makeRunEnv("unused", { CF_ACCOUNT_ID: "acct123" }).env, "custom-zai/glm-5.3-flash", {
         messages: [],
       }),
-    ).rejects.toThrow("CUSTOM_LLM_KEY_ZAI");
+    ).rejects.toThrow('set the CUSTOM_LLM_KEY_ZAI secret');
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("rejects naming the wiring convention for an unknown provider, without fetching", async () => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(
+      runLLM(makeRunEnv("unused", zaiEnv).env, "custom-acme/foo", { messages: [] }),
+    ).rejects.toThrow('no secret is wired for provider "acme"; add it to CUSTOM_KEY_SECRET');
     expect(fetchMock).not.toHaveBeenCalled();
   });
 

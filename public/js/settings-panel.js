@@ -1,75 +1,81 @@
 // ── Dashboard settings panel: history/trash plus the three chat-model ────
 // pickers (LLM_MODEL, INSIGHT_LLM_MODEL, WHEN_LLM_MODEL).
 //
+// One SETTINGS table drives all five rows. Each entry carries its select's
+// DOM id (public/index.html pins it; the reset button's and error slot's ids
+// follow the same id + '-reset' / '-error' convention and are derived below),
+// the shipped default Reset goes back to (must equal the Worker's DEFAULTS,
+// src/config.ts), the `kind` of value PATCH sends (number or string), where
+// the choices come from, and the option-label formatter.
+//
 // The history/trash keys share their choices and ranges with the desktop
 // Advanced Settings window (contract 4.6, installer/src-tauri/src/settings.rs)
-// — a parity test pins both. Model choices are server-driven instead: they
-// come from GET /config's `modelChoices` (src/config.ts MODEL_CHOICES). A
-// member sees the same effective values, read-only; admin status reuses
-// team.js's existing GET /team/members probe (teamIsAdmin) rather than asking
-// a second time.
-
-// The three chat-model settings. Choices are NOT pinned here: they come from
-// the Worker's GET /config `modelChoices` (src/config.ts MODEL_CHOICES), so
-// the panel can never drift from the Worker's list.
-const MODEL_KEYS = ['LLM_MODEL', 'INSIGHT_LLM_MODEL', 'WHEN_LLM_MODEL'];
-
-const SETTINGS_CHOICES = {
-  TRASH_RETENTION_DAYS: [7, 14, 30, 90],
-  VERSION_KEEP: [10, 20, 50],
+// — a parity test pins both, so their fixed `choices` live here. The model
+// keys are server-driven instead: `serverChoices: true` fills the select from
+// GET /config's `modelChoices` (src/config.ts MODEL_CHOICES), so the panel
+// can never drift from the Worker's list. A member sees the same effective
+// values, read-only; admin status reuses team.js's existing GET /team/members
+// probe (teamIsAdmin) rather than asking a second time.
+const SETTINGS = {
+  TRASH_RETENTION_DAYS: {
+    selectId: 'setting-trash-retention',
+    default: 14,
+    kind: 'number',
+    choices: [7, 14, 30, 90],
+    // Same formatter the select was rendered with, so a rollback or an Undo
+    // reconstructs the option text and not just the selected value.
+    label: retentionDaysLabel,
+  },
+  VERSION_KEEP: {
+    selectId: 'setting-version-keep',
+    default: 20,
+    kind: 'number',
+    choices: [10, 20, 50],
+  },
+  LLM_MODEL: {
+    selectId: 'setting-llm-model',
+    default: '@cf/meta/llama-4-scout-17b-16e-instruct',
+    kind: 'string',
+    serverChoices: true,
+  },
+  INSIGHT_LLM_MODEL: {
+    selectId: 'setting-insight-llm-model',
+    default: '@cf/openai/gpt-oss-120b',
+    kind: 'string',
+    serverChoices: true,
+  },
+  WHEN_LLM_MODEL: {
+    selectId: 'setting-when-llm-model',
+    default: '@cf/openai/gpt-oss-120b',
+    kind: 'string',
+    serverChoices: true,
+  },
 };
 
-/** Per-key choices as last loaded. Model keys are filled from GET /config's
- * `modelChoices`; falling back to the shipped default keeps a render alive
- * even before the first load (or if the Worker predates modelChoices). */
+/** Reset buttons and error slots follow the select id convention pinned by
+ * public/index.html: `<select id> + '-reset'` and `<select id> + '-error'`. */
+const resetBtnId = (key) => `${SETTINGS[key].selectId}-reset`;
+const errorId = (key) => `${SETTINGS[key].selectId}-error`;
+
+/** Per-key choices as last loaded. `serverChoices` keys are filled from GET
+ * /config's `modelChoices`; falling back to the entry's fixed `choices`, and
+ * then to a one-entry default list, keeps a render alive even before the
+ * first load (or if the Worker predates modelChoices). */
 const settingsChoices = {};
-const choicesFor = (key) => settingsChoices[key] || SETTINGS_CHOICES[key] || [SETTINGS_DEFAULT[key]];
-
-/** Must equal the Worker's shipped DEFAULTS (src/config.ts) — what Reset goes back to. */
-const SETTINGS_DEFAULT = {
-  TRASH_RETENTION_DAYS: 14,
-  VERSION_KEEP: 20,
-  LLM_MODEL: '@cf/meta/llama-4-scout-17b-16e-instruct',
-  INSIGHT_LLM_MODEL: '@cf/openai/gpt-oss-120b',
-  WHEN_LLM_MODEL: '@cf/openai/gpt-oss-120b',
-};
-
-const SETTINGS_SELECT_ID = {
-  TRASH_RETENTION_DAYS: 'setting-trash-retention',
-  VERSION_KEEP: 'setting-version-keep',
-  LLM_MODEL: 'setting-llm-model',
-  INSIGHT_LLM_MODEL: 'setting-insight-llm-model',
-  WHEN_LLM_MODEL: 'setting-when-llm-model',
-};
-
-const SETTINGS_RESET_BTN_ID = {
-  TRASH_RETENTION_DAYS: 'setting-trash-retention-reset',
-  VERSION_KEEP: 'setting-version-keep-reset',
-  LLM_MODEL: 'setting-llm-model-reset',
-  INSIGHT_LLM_MODEL: 'setting-insight-llm-model-reset',
-  WHEN_LLM_MODEL: 'setting-when-llm-model-reset',
-};
-
-const SETTINGS_ERROR_ID = {
-  TRASH_RETENTION_DAYS: 'setting-trash-retention-error',
-  VERSION_KEEP: 'setting-version-keep-error',
-  LLM_MODEL: 'setting-llm-model-error',
-  INSIGHT_LLM_MODEL: 'setting-insight-llm-model-error',
-  WHEN_LLM_MODEL: 'setting-when-llm-model-error',
-};
+const choicesFor = (key) => settingsChoices[key] || SETTINGS[key].choices || [SETTINGS[key].default];
 
 /** A failed save reads right next to the control it failed on, not in a
  * toast the reader may have already looked away from. Cleared on the
  * control's next successful write. */
 function showSettingError(key, message) {
-  const el = document.getElementById(SETTINGS_ERROR_ID[key]);
+  const el = document.getElementById(errorId(key));
   if (!el) return;
   el.textContent = message;
   el.hidden = false;
 }
 
 function clearSettingError(key) {
-  const el = document.getElementById(SETTINGS_ERROR_ID[key]);
+  const el = document.getElementById(errorId(key));
   if (!el) return;
   el.hidden = true;
   el.textContent = '';
@@ -112,23 +118,19 @@ function retentionDaysLabel(n) {
   return tPlural('settingsPanel.days', n);
 }
 
-/** Same formatter each select was rendered with, so a rollback or an Undo
- * reconstructs the option text and not just the selected value. */
-const SETTINGS_LABEL = { TRASH_RETENTION_DAYS: retentionDaysLabel, VERSION_KEEP: undefined };
-
 /** Reset is an admin-only affordance, and only means something once the
  * effective value has actually left the shipped default. */
 function updateResetVisibility(key, value) {
-  const btn = document.getElementById(SETTINGS_RESET_BTN_ID[key]);
+  const btn = document.getElementById(resetBtnId(key));
   if (!btn) return;
-  btn.hidden = teamIsAdmin === false || value === SETTINGS_DEFAULT[key];
+  btn.hidden = teamIsAdmin === false || value === SETTINGS[key].default;
 }
 
 function applySettingsRole(admin) {
   const note = document.getElementById('settings-admin-note');
   if (note) note.hidden = admin;
-  for (const key of Object.keys(SETTINGS_SELECT_ID)) {
-    const sel = document.getElementById(SETTINGS_SELECT_ID[key]);
+  for (const key of Object.keys(SETTINGS)) {
+    const sel = document.getElementById(SETTINGS[key].selectId);
     if (sel) sel.disabled = !admin;
     updateResetVisibility(key, settingsCurrent[key]);
   }
@@ -138,18 +140,15 @@ async function loadSettingsPanel() {
   try {
     const data = await readTeamConfig();
     const cfg = data?.config || {};
-    settingsCurrent.TRASH_RETENTION_DAYS = cfg.TRASH_RETENTION_DAYS;
-    settingsCurrent.VERSION_KEEP = cfg.VERSION_KEEP;
-    for (const key of MODEL_KEYS) {
-      settingsCurrent[key] = cfg[key] ?? SETTINGS_DEFAULT[key];
-      settingsChoices[key] = Array.isArray(data?.modelChoices?.[key]) ? data.modelChoices[key] : undefined;
-      renderSettingsOptions(SETTINGS_SELECT_ID[key], choicesFor(key), settingsCurrent[key]);
+    for (const key of Object.keys(SETTINGS)) {
+      const setting = SETTINGS[key];
+      settingsCurrent[key] = cfg[key] ?? setting.default;
+      if (setting.serverChoices) {
+        settingsChoices[key] = Array.isArray(data?.modelChoices?.[key]) ? data.modelChoices[key] : undefined;
+      }
+      renderSettingsOptions(setting.selectId, choicesFor(key), settingsCurrent[key], setting.label);
       clearSettingError(key);
     }
-    renderSettingsOptions('setting-trash-retention', SETTINGS_CHOICES.TRASH_RETENTION_DAYS, cfg.TRASH_RETENTION_DAYS, retentionDaysLabel);
-    renderSettingsOptions('setting-version-keep', SETTINGS_CHOICES.VERSION_KEEP, cfg.VERSION_KEEP);
-    clearSettingError('TRASH_RETENTION_DAYS');
-    clearSettingError('VERSION_KEEP');
     // No visible stub until T-0089.5.5 gives the Worker a RECALL_LOG default;
     // presence in `defaults` is what turns this row on.
     const recallLogRow = document.getElementById('setting-recall-log-row');
@@ -210,7 +209,7 @@ async function onSettingChange(selectId, key) {
   if (!sel) return;
   const previous = settingsCurrent[key];
   // Numeric settings arrive as digit strings; model ids stay strings.
-  const value = /^-?\d+(\.\d+)?$/.test(sel.value) ? Number(sel.value) : sel.value;
+  const value = SETTINGS[key].kind === 'number' ? Number(sel.value) : sel.value;
   try {
     await patchSetting(key, value);
     settingsCurrent[key] = value;
@@ -222,7 +221,7 @@ async function onSettingChange(selectId, key) {
         try {
           await patchSetting(key, previous);
           settingsCurrent[key] = previous;
-          renderSettingsOptions(selectId, choicesFor(key), previous, SETTINGS_LABEL[key]);
+          renderSettingsOptions(selectId, choicesFor(key), previous, SETTINGS[key].label);
           updateResetVisibility(key, previous);
           clearSettingError(key);
         } catch (e) {
@@ -233,7 +232,7 @@ async function onSettingChange(selectId, key) {
   } catch (e) {
     // A refused write leaves the effective value unchanged; the select goes
     // back to it rather than sitting on a value the Worker never accepted.
-    renderSettingsOptions(selectId, choicesFor(key), previous, SETTINGS_LABEL[key]);
+    renderSettingsOptions(selectId, choicesFor(key), previous, SETTINGS[key].label);
     updateResetVisibility(key, previous);
     if (e.status === 403) {
       // The role may have changed since the sheet opened: re-probe rather
@@ -251,15 +250,15 @@ async function onSettingChange(selectId, key) {
  * already offers admins elsewhere.
  */
 async function resetSetting(key) {
-  const selectId = SETTINGS_SELECT_ID[key];
+  const selectId = SETTINGS[key].selectId;
   try {
     await requestConfig(`${WORKER_URL}/config/${key}`, {
       method: 'DELETE',
       headers: { Authorization: `Bearer ${AUTH_TOKEN}` },
     });
-    settingsCurrent[key] = SETTINGS_DEFAULT[key];
-    renderSettingsOptions(selectId, choicesFor(key), SETTINGS_DEFAULT[key], SETTINGS_LABEL[key]);
-    updateResetVisibility(key, SETTINGS_DEFAULT[key]);
+    settingsCurrent[key] = SETTINGS[key].default;
+    renderSettingsOptions(selectId, choicesFor(key), SETTINGS[key].default, SETTINGS[key].label);
+    updateResetVisibility(key, SETTINGS[key].default);
     clearSettingError(key);
     showToast(t('settingsPanel.wasReset'));
   } catch (e) {

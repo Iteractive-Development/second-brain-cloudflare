@@ -571,7 +571,7 @@ const I18N_EN = {
     insightLabel: 'Model for weekly insight reasoning',
     whenLabel: 'Model for commitment extraction',
     gatewayNote:
-      'Provider/model entries (for example custom-zai/glm-5.3-flash) route through Cloudflare AI Gateway and need Unified Billing credits or a stored provider key. Everything else runs on Workers AI.',
+      "Provider/model entries (for example custom-zai/glm-5.3-flash) route through Cloudflare AI Gateway. z.ai entries use the z.ai key carried by this deployment's Worker; other providers need Unified Billing credits or a stored provider key. Everything else runs on Workers AI.",
     custom: 'Custom ({value})',
     adminOnly: 'Only the owner or an admin can change these.',
     saved: 'Saved',
@@ -1964,7 +1964,7 @@ const I18N_IT = {
     insightLabel: 'Modello per le insight settimanali',
     whenLabel: "Modello per l'estrazione degli impegni",
     gatewayNote:
-      'Le voci provider/modello (per esempio custom-zai/glm-5.3-flash) passano da Cloudflare AI Gateway e richiedono crediti Unified Billing o una chiave provider salvata. Tutto il resto gira su Workers AI.',
+      'Le voci provider/modello (per esempio custom-zai/glm-5.3-flash) passano da Cloudflare AI Gateway. Le voci z.ai usano la chiave z.ai inviata dal Worker di questa distribuzione; gli altri provider richiedono crediti Unified Billing o una chiave provider salvata. Tutto il resto gira su Workers AI.',
     custom: 'Personalizzato ({value})',
     adminOnly: 'Solo il proprietario o un amministratore può modificarle.',
     saved: 'Salvato',

@@ -34,11 +34,11 @@ export function runLLM(env: Env, model: string, input: Record<string, unknown>):
   return env.AI.run(model, input, { gateway: { id: env.AI_GATEWAY ?? "default" } });
 }
 
-/** custom-<slug>/<model>: which Worker secret holds that provider's API key. */
-function customProviderKey(env: Env, slug: string): string | undefined {
-  if (slug === "zai") return env.CUSTOM_LLM_KEY_ZAI;
-  return undefined;
-}
+/** custom-<slug>/<model>: which Worker secret holds that provider's API key —
+ * the single place the slug-to-secret naming rule lives; add a provider, add a line. */
+const CUSTOM_KEY_SECRET: Readonly<Record<string, (keyof Env) & `CUSTOM_LLM_KEY_${string}` | undefined>> = {
+  zai: "CUSTOM_LLM_KEY_ZAI",
+};
 
 /**
  * The Codra-style BYOK lane described on runLLM. Requests go to the gateway's
@@ -51,9 +51,19 @@ function customProviderKey(env: Env, slug: string): string | undefined {
  */
 async function runCustomProviderLLM(env: Env, model: string, input: Record<string, unknown>): Promise<unknown> {
   const slug = /^custom-([a-z0-9-]+)\//.exec(model)?.[1];
-  const key = slug ? customProviderKey(env, slug) : undefined;
-  if (!slug || !key) {
-    throw new Error(`No provider key configured for model "${model}" — set the CUSTOM_LLM_KEY_${(slug ?? "??").toUpperCase().replace(/-/g, "_")} secret.`);
+  if (slug === undefined) {
+    throw new Error(
+      `No provider key configured for model "${model}" — a custom model must be custom-<provider>/<model> with the provider wired in CUSTOM_KEY_SECRET in src/lib/ai.ts.`,
+    );
+  }
+  const secretName = CUSTOM_KEY_SECRET[slug];
+  const key = secretName ? env[secretName] : undefined;
+  if (!key) {
+    throw new Error(
+      secretName
+        ? `No provider key configured for model "${model}" — set the ${secretName} secret.`
+        : `No provider key configured for model "${model}" — no secret is wired for provider "${slug}"; add it to CUSTOM_KEY_SECRET in src/lib/ai.ts.`,
+    );
   }
   if (!env.CF_ACCOUNT_ID) throw new Error("CF_ACCOUNT_ID var is required for custom-provider models.");
 
